@@ -1,0 +1,17 @@
+[package]
+name = "fuel-indexer-types"
+authors = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+readme = { workspace = true }
+license = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+fuel-core-types = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }

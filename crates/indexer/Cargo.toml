@@ -1,0 +1,37 @@
+[package]
+name = "fuel-indexer"
+authors = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+readme = { workspace = true }
+license = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+fuel-core = { workspace = true, optional = true }
+fuel-core-types = { workspace = true }
+fuel-core-services = { workspace = true }
+fuels = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+fuel-receipts-manager = { workspace = true }
+fuel-events-manager = { workspace = true }
+fuel-indexer-types = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1.0.145"
+
+[features]
+rocksdb = [
+    "dep:fuel-core",
+    "fuel-core/rocksdb-production",
+    "fuel-receipts-manager/rocksdb",
+    "fuel-events-manager/rocksdb",
+]

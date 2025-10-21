@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/events_manager",
+    "crates/receipts_manager",
+    "crates/storage_utils",
+    "crates/types",
+    "crates/indexer",
+    "tests",
+]
+
+[workspace.package]
+authors = ["Fuel Labs <contact@fuel.sh>"]
+edition = "2024"
+homepage = "https://fuel.network/"
+license = "Apache-2.0"
+rust-version = "1.86.0"
+readme = "README.md"
+version = "0.0.1"
+
+[workspace.dependencies]
+async-trait = { version = "0.1" }
+anyhow = "1.0.66"
+enum-iterator = { version = "1.2" }
+fuel-core = { version = "0.47.1" }
+fuel-core-client = { version = "0.47.1" }
+fuel-core-services = { version = "0.47.1" }
+fuel-core-storage = { version = "0.47.1" }
+fuel-core-types = { version = "0.47.1" }
+fuel-core-chain-config = { version = "0.47.1" }
+fuel-events-manager = { path = "crates/events_manager" }
+fuel-receipts-manager = { path = "crates/receipts_manager" }
+fuel-storage-utils = { path = "crates/storage_utils" }
+fuel-indexer-types = { path = "crates/types" }
+fuel-indexer = { path = "crates/indexer" }
+fuels = { version = "0.76.0" }
+futures = "0.3"
+serde = { version = "1" }
+strum = { version = "0.25" }
+strum_macros = { version = "0.25" }
+tracing = "0.1"
+url = "2"
+tokio = { version = "1.48.0" }
+
+[patch.crates-io]
+fuels = { git = "https://github.com/FuelLabs/fuels-rs/", branch = "feature/log-id-expose" }

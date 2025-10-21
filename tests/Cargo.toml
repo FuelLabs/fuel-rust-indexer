@@ -1,0 +1,22 @@
+[package]
+name = "integration-tests"
+authors = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+readme = { workspace = true }
+license = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+publish = false
+
+[lib]
+path = "mod.rs"
+
+[dev-dependencies]
+fuel-indexer = { workspace = true, features = ["rocksdb"] }
+fuel-core = { workspace = true, features = ["test-helpers"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+fuels = { workspace = true }
+serde = { workspace = true }
+url = { workspace = true }
+tempdir = "0.3"
