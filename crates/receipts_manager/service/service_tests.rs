@@ -70,7 +70,7 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     let starting_height = 0u32.into();
 
     let service = UninitializedService::new(starting_height, storage, fetcher).unwrap();
-    let mut shared_state = service.shared_data();
+    let shared_state = service.shared_data();
     let mut task = service
         .into_task(&StateWatcher::started(), ())
         .await
@@ -78,7 +78,7 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
 
     // Given
     let stream = shared_state
-        .events_starting_from(starting_height)
+        .unstable_receipts_starting_from(starting_height)
         .await
         .unwrap();
 
@@ -91,12 +91,12 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     assert_eq!(
         result,
         vec![
-            ServiceEvent::TransactionEvent(TransactionEvent {
+            UnstableReceipts::Receipts(TransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),
             }),
-            ServiceEvent::Checkpoint(CheckpointEvent {
+            UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
                 events_count: 1,
             })
@@ -118,7 +118,7 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
     let starting_height = 0u32.into();
 
     let service = UninitializedService::new(starting_height, storage, fetcher).unwrap();
-    let mut shared_state = service.shared_data();
+    let shared_state = service.shared_data();
     let mut task = service
         .into_task(&StateWatcher::started(), ())
         .await
@@ -134,7 +134,7 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
 
     // When
     let stream = shared_state
-        .events_starting_from(starting_height)
+        .unstable_receipts_starting_from(starting_height)
         .await
         .unwrap();
 
@@ -143,20 +143,20 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
     assert_eq!(
         result,
         vec![
-            ServiceEvent::TransactionEvent(TransactionEvent {
+            UnstableReceipts::Receipts(TransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),
             }),
-            ServiceEvent::Checkpoint(CheckpointEvent {
+            UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
                 events_count: 1
             }),
-            ServiceEvent::Checkpoint(CheckpointEvent {
+            UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 2u32.into(),
                 events_count: 0
             }),
-            ServiceEvent::Checkpoint(CheckpointEvent {
+            UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 3u32.into(),
                 events_count: 0
             }),
@@ -178,7 +178,7 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
     let starting_height = 0u32.into();
 
     let service = UninitializedService::new(starting_height, storage, fetcher).unwrap();
-    let mut shared_state = service.shared_data();
+    let shared_state = service.shared_data();
     let mut task = service
         .into_task(&StateWatcher::started(), ())
         .await
@@ -190,7 +190,7 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
 
     // When
     let stream = shared_state
-        .events_starting_from(starting_height)
+        .unstable_receipts_starting_from(starting_height)
         .await
         .unwrap();
     let _ = fuel_core.produce_block().await;
@@ -203,20 +203,20 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
     assert_eq!(
         result,
         vec![
-            ServiceEvent::TransactionEvent(TransactionEvent {
+            UnstableReceipts::Receipts(TransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),
             }),
-            ServiceEvent::Checkpoint(CheckpointEvent {
+            UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
                 events_count: 1
             }),
-            ServiceEvent::Checkpoint(CheckpointEvent {
+            UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 2u32.into(),
                 events_count: 0
             }),
-            ServiceEvent::Checkpoint(CheckpointEvent {
+            UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 3u32.into(),
                 events_count: 0
             }),
@@ -238,7 +238,7 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     let starting_height = 0u32.into();
 
     let service = UninitializedService::new(starting_height, storage, fetcher).unwrap();
-    let mut shared_state = service.shared_data();
+    let shared_state = service.shared_data();
     let mut task = service
         .into_task(&StateWatcher::started(), ())
         .await
@@ -246,7 +246,7 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
 
     // Given
     let stream = shared_state
-        .events_starting_from(2u32.into())
+        .unstable_receipts_starting_from(2u32.into())
         .await
         .unwrap();
 
@@ -264,7 +264,7 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
 
     // Then
     let result = stream.take(1).try_collect::<Vec<_>>().await.unwrap();
-    let ServiceEvent::TransactionEvent(event) = &result[0] else {
+    let UnstableReceipts::Receipts(event) = &result[0] else {
         panic!("Expected a TransactionEvent");
     };
     assert_eq!(event.receipts.len(), 5);

@@ -70,6 +70,8 @@ pub struct FullBlock {
 pub struct TransactionWithReceipts {
     pub id: TransactionId,
     pub is_mint: bool,
+    #[cfg(feature = "blocks-subscription")]
+    pub raw_payload: fuel_core_client::client::schema::HexString,
     pub status: Option<TransactionStatus>,
 }
 

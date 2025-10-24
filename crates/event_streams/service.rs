@@ -6,9 +6,14 @@ use fuel_core_services::{
     ServiceRunner,
     StateWatcher,
     TaskNextAction,
+    stream::BoxStream,
 };
 use fuel_core_types::fuel_types::BlockHeight;
-use fuel_events_manager::service::EventManager;
+use fuel_events_manager::service::{
+    EventManager,
+    TransactionEvents,
+    UnstableEvent,
+};
 use fuel_receipts_manager::adapters::{
     ReceiptGraphqlManager,
     graphql_event_adapter,
@@ -23,7 +28,10 @@ use url::Url;
 #[cfg(feature = "rocksdb")]
 pub use rocksdb::*;
 
-pub struct IndexerConfig {
+#[cfg(feature = "blocks-subscription")]
+use fuel_indexer_types::events::BlockEvent;
+
+pub struct Config {
     pub starting_block_height: BlockHeight,
     pub fuel_graphql_url: Url,
     pub heartbeat_capacity: NonZeroUsize,
@@ -32,7 +40,7 @@ pub struct IndexerConfig {
     pub blocks_request_concurrency: usize,
 }
 
-impl IndexerConfig {
+impl Config {
     pub fn new(starting_block_height: BlockHeight, url: Url) -> Self {
         Self {
             starting_block_height,
@@ -43,6 +51,12 @@ impl IndexerConfig {
             blocks_request_concurrency: 100,
         }
     }
+}
+
+#[derive(Clone)]
+pub struct SharedState<Event, ES, RS> {
+    events: fuel_events_manager::service::SharedState<Event, ES>,
+    _receipts: fuel_receipts_manager::service::SharedState<RS>,
 }
 
 pub struct Task<Processor, RS, ES>
@@ -62,13 +76,16 @@ where
     RS: fuel_receipts_manager::port::Storage,
     ES: fuel_events_manager::port::Storage,
 {
-    const NAME: &'static str = "IndexerService";
-    type SharedData = fuel_events_manager::service::SharedState<Processor::Event, ES>;
+    const NAME: &'static str = "StreamsService";
+    type SharedData = SharedState<Processor::Event, ES, RS>;
     type Task = Self;
     type TaskParams = ();
 
     fn shared_data(&self) -> Self::SharedData {
-        self.events_manager.shared.clone()
+        SharedState {
+            events: self.events_manager.shared.clone(),
+            _receipts: self.receipts_manager.shared.clone(),
+        }
     }
 
     async fn into_task(
@@ -118,8 +135,43 @@ where
     }
 }
 
+impl<Event, ES, RS> SharedState<Event, ES, RS>
+where
+    Event: fuel_events_manager::port::StorableEvent,
+    ES: fuel_events_manager::port::Storage,
+    RS: fuel_receipts_manager::port::Storage,
+{
+    pub async fn stable_events_starting_from(
+        &self,
+        starting_block_height: BlockHeight,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<TransactionEvents<Event>>>> {
+        self.events
+            .stable_events_starting_from(starting_block_height)
+            .await
+    }
+
+    pub async fn unstable_events_starting_from(
+        &self,
+        starting_block_height: BlockHeight,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
+        self.events
+            .unstable_events_starting_from(starting_block_height)
+            .await
+    }
+
+    #[cfg(feature = "blocks-subscription")]
+    pub async fn blocks_starting_from(
+        &self,
+        starting_block_height: BlockHeight,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<BlockEvent>>> {
+        self._receipts
+            .blocks_starting_from(starting_block_height)
+            .await
+    }
+}
+
 pub fn new_service<Processor, RS, ES>(
-    config: IndexerConfig,
+    config: Config,
     processor: Processor,
     receipts_storage: RS,
     events_storage: ES,
@@ -129,7 +181,7 @@ where
     RS: fuel_receipts_manager::port::Storage,
     ES: fuel_events_manager::port::Storage,
 {
-    let IndexerConfig {
+    let Config {
         starting_block_height,
         fuel_graphql_url,
         heartbeat_capacity,
@@ -183,20 +235,20 @@ mod rocksdb {
     use fuels::core::codec::DecoderConfig;
     use std::path::PathBuf;
 
-    pub fn new_logs_indexer<Fn, Event>(
+    pub type LogsStreamsService<Fn> = ServiceRunner<
+        Task<
+            SimplerProcessorAdapter<FnReceiptParser<Fn>>,
+            fuel_receipts_manager::rocksdb::Storage,
+            fuel_events_manager::rocksdb::Storage,
+        >,
+    >;
+
+    pub fn new_logs_streams<Fn, Event>(
         parser: Fn,
         path: PathBuf,
         database_config: DatabaseConfig,
-        config: IndexerConfig,
-    ) -> anyhow::Result<
-        ServiceRunner<
-            Task<
-                SimplerProcessorAdapter<FnReceiptParser<Fn>>,
-                fuel_receipts_manager::rocksdb::Storage,
-                fuel_events_manager::rocksdb::Storage,
-            >,
-        >,
-    >
+        config: Config,
+    ) -> anyhow::Result<LogsStreamsService<Fn>>
     where
         Event: fuel_events_manager::port::StorableEvent,
         Fn: FnOnce(DecoderConfig, &Receipt) -> Option<Event>

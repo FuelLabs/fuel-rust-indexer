@@ -1,7 +1,9 @@
 use fuel_core_types::{
+    blockchain::header::BlockHeader,
     fuel_tx::{
         ContractId,
         Receipt,
+        Transaction,
         TxId,
         TxPointer,
     },
@@ -10,7 +12,7 @@ use fuel_core_types::{
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TransactionEvent {
+pub struct TransactionReceipts {
     pub tx_pointer: TxPointer,
     pub tx_id: TxId,
     pub receipts: Arc<Vec<Receipt>>,
@@ -25,25 +27,25 @@ pub struct CheckpointEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ServiceEvent {
-    TransactionEvent(TransactionEvent),
+pub enum UnstableReceipts {
+    Receipts(TransactionReceipts),
     Checkpoint(CheckpointEvent),
     Rollback(BlockHeight),
 }
 
-impl ServiceEvent {
+impl UnstableReceipts {
     pub fn block_height(&self) -> BlockHeight {
         match self {
-            ServiceEvent::TransactionEvent(event) => event.tx_pointer.block_height(),
-            ServiceEvent::Checkpoint(event) => event.block_height,
-            ServiceEvent::Rollback(at) => *at,
+            UnstableReceipts::Receipts(event) => event.tx_pointer.block_height(),
+            UnstableReceipts::Checkpoint(event) => event.block_height,
+            UnstableReceipts::Rollback(at) => *at,
         }
     }
 }
 
-impl From<TransactionEvent> for ServiceEvent {
-    fn from(event: TransactionEvent) -> Self {
-        ServiceEvent::TransactionEvent(event)
+impl From<TransactionReceipts> for UnstableReceipts {
+    fn from(event: TransactionReceipts) -> Self {
+        UnstableReceipts::Receipts(event)
     }
 }
 
@@ -71,4 +73,10 @@ impl<Event> BlockChainEvent<Event> {
 
         Ok(())
     }
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone)]
+pub struct BlockEvent {
+    pub header: BlockHeader,
+    pub transactions: Vec<Arc<Transaction>>,
 }

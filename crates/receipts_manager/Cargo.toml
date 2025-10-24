@@ -51,3 +51,4 @@ rocksdb = [
     "fuel-core/rocksdb-production",
     "fuel-storage-utils/rocksdb",
 ]
+blocks-subscription = []

@@ -5,7 +5,7 @@ members = [
     "crates/receipts_manager",
     "crates/storage_utils",
     "crates/types",
-    "crates/indexer",
+    "crates/event_streams",
     "tests",
 ]
 
@@ -32,7 +32,7 @@ fuel-events-manager = { path = "crates/events_manager" }
 fuel-receipts-manager = { path = "crates/receipts_manager" }
 fuel-storage-utils = { path = "crates/storage_utils" }
 fuel-indexer-types = { path = "crates/types" }
-fuel-indexer = { path = "crates/indexer" }
+fuel-event-streams = { path = "crates/event_streams" }
 fuels = { version = "0.76.0" }
 futures = "0.3"
 serde = { version = "1" }

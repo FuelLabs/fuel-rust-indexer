@@ -7,5 +7,5 @@ pub use fuel_receipts_manager;
 pub use fuels;
 
 pub mod adapters;
-pub mod indexer;
 pub mod processors;
+pub mod service;

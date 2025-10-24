@@ -8,8 +8,11 @@ use fuel_core_storage::{
     kv_store::StorageColumn,
     structured_storage::TableWithBlueprint,
 };
-use fuel_indexer_types::events::TransactionEvent;
+use fuel_indexer_types::events::TransactionReceipts;
 use fuels::types::BlockHeight;
+
+#[cfg(feature = "blocks-subscription")]
+use fuel_indexer_types::events::BlockEvent;
 
 #[repr(u32)]
 #[derive(
@@ -25,8 +28,10 @@ use fuels::types::BlockHeight;
 )]
 pub enum Column {
     Metadata = 0,
-    Receipts = 1,
-    LastCheckpoint = 2,
+    LastCheckpoint = 1,
+    Receipts = 2,
+    #[cfg(feature = "blocks-subscription")]
+    Blocks = 3,
 }
 
 impl Column {
@@ -56,7 +61,7 @@ impl Mappable for Receipts {
     type Key = Self::OwnedKey;
     type OwnedKey = BlockHeight;
     type Value = Self::OwnedValue;
-    type OwnedValue = Vec<TransactionEvent>;
+    type OwnedValue = Vec<TransactionReceipts>;
 }
 
 impl TableWithBlueprint for Receipts {
@@ -65,6 +70,27 @@ impl TableWithBlueprint for Receipts {
 
     fn column() -> Self::Column {
         Column::Receipts
+    }
+}
+
+#[cfg(feature = "blocks-subscription")]
+pub struct Blocks;
+
+#[cfg(feature = "blocks-subscription")]
+impl Mappable for Blocks {
+    type Key = Self::OwnedKey;
+    type OwnedKey = BlockHeight;
+    type Value = Self::OwnedValue;
+    type OwnedValue = BlockEvent;
+}
+
+#[cfg(feature = "blocks-subscription")]
+impl TableWithBlueprint for Blocks {
+    type Blueprint = Plain<Primitive<4>, Postcard>;
+    type Column = Column;
+
+    fn column() -> Self::Column {
+        Column::Blocks
     }
 }
 

@@ -12,7 +12,7 @@ use fuel_core_types::{
     },
     fuel_types::BlockHeight,
 };
-use fuel_indexer_types::events::ServiceEvent;
+use fuel_indexer_types::events::UnstableReceipts;
 use fuel_storage_utils::CommitLazyChanges;
 use std::borrow::Borrow;
 
@@ -42,7 +42,7 @@ pub trait StreamsSource: Send + Sync + 'static {
     fn events_starting_from(
         &mut self,
         start_height: BlockHeight,
-    ) -> impl Future<Output = anyhow::Result<BoxStream<anyhow::Result<ServiceEvent>>>> + Send;
+    ) -> impl Future<Output = anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>>> + Send;
 }
 
 pub trait ReceiptsProcessor: Send + Sync + 'static {

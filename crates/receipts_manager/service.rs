@@ -1,6 +1,9 @@
-use crate::storage::{
-    LastCheckpoint,
-    Receipts,
+use crate::{
+    port::FinalizedBlock,
+    storage::{
+        LastCheckpoint,
+        Receipts,
+    },
 };
 use fuel_core_services::{
     RunnableService,
@@ -31,8 +34,8 @@ use fuel_core_types::{
 };
 use fuel_indexer_types::events::{
     CheckpointEvent,
-    ServiceEvent,
-    TransactionEvent,
+    TransactionReceipts,
+    UnstableReceipts,
 };
 use fuel_storage_utils::StorageIterator;
 use futures::StreamExt;
@@ -49,6 +52,11 @@ use tokio::{
     time::Instant,
 };
 use tokio_stream::wrappers::BroadcastStream;
+
+#[cfg(feature = "blocks-subscription")]
+use crate::storage::Blocks;
+#[cfg(feature = "blocks-subscription")]
+use fuel_indexer_types::events::BlockEvent;
 
 #[cfg(test)]
 mod service_tests;
@@ -82,11 +90,15 @@ where
 
         // TODO: Decrease channel size and start handle backpressure properly to avoid
         //  huge memory consumption.
-        let (broadcast, _) = broadcast::channel(100_000);
+        let (broadcast_receipts, _) = broadcast::channel(100_000);
+        #[cfg(feature = "blocks-subscription")]
+        let (broadcast_blocks, _) = broadcast::channel(100_000);
         let shared_state = SharedState {
             starting_height,
             storage: storage.clone(),
-            broadcast,
+            broadcast_receipts,
+            #[cfg(feature = "blocks-subscription")]
+            broadcast_blocks,
             checkpoint_height: checkpoint_height_receiver,
         };
 
@@ -103,14 +115,16 @@ where
 
 pub struct Task<S, F> {
     storage: S,
-    event_source: BoxStream<TransactionEvent>,
+    event_source: BoxStream<TransactionReceipts>,
     fetcher: F,
-    heartbeat: BoxStream<(BlockHeight, Vec<TransactionEvent>)>,
+    heartbeat: BoxStream<FinalizedBlock>,
     heartbeat_liveness: tokio::time::Interval,
-    emitted_events: Vec<TransactionEvent>,
-    pending_events: BTreeMap<BlockHeight, BTreeMap<u16, TransactionEvent>>,
+    emitted_events: Vec<TransactionReceipts>,
+    pending_events: BTreeMap<BlockHeight, BTreeMap<u16, TransactionReceipts>>,
     checkpoint_height: watch::Sender<BlockHeight>,
-    broadcast: broadcast::Sender<ServiceEvent>,
+    broadcast_receipts: broadcast::Sender<UnstableReceipts>,
+    #[cfg(feature = "blocks-subscription")]
+    broadcast_blocks: broadcast::Sender<BlockEvent>,
 }
 
 #[async_trait::async_trait]
@@ -144,8 +158,8 @@ where
             shared_state,
         } = self;
 
-        let event_source = event_fetcher.predicted_events_stream().await?;
-        let heartbeat = event_fetcher.confirmed_events_stream().await?;
+        let event_source = event_fetcher.predicted_receipts_stream().await?;
+        let heartbeat = event_fetcher.finalized_blocks_stream().await?;
 
         let last_available_height = event_fetcher.last_height().await?;
         let liveness_duration = Duration::from_secs(5);
@@ -162,7 +176,9 @@ where
             pending_events: Default::default(),
             emitted_events: Default::default(),
             checkpoint_height,
-            broadcast: shared_state.broadcast,
+            broadcast_receipts: shared_state.broadcast_receipts,
+            #[cfg(feature = "blocks-subscription")]
+            broadcast_blocks: shared_state.broadcast_blocks,
             heartbeat_liveness,
         };
 
@@ -187,8 +203,8 @@ where
     F: super::port::Fetcher,
 {
     fn broadcast_event(
-        broadcast: &broadcast::Sender<ServiceEvent>,
-        event: ServiceEvent,
+        broadcast: &broadcast::Sender<UnstableReceipts>,
+        event: UnstableReceipts,
     ) -> anyhow::Result<()> {
         // Broadcast to internal channel
         let _ = broadcast.send(event);
@@ -205,12 +221,12 @@ where
 
         tracing::info!("Syncing up to from {start} to {end}");
 
-        let mut stream = self.fetcher.confirmed_events_for_range(start..=end);
+        let mut stream = self.fetcher.finalized_blocks_for_range(start..=end);
 
         while let Some(result) = stream.next().await {
-            let (block_height, events) = result?;
-            tracing::info!("Handle block height {}", block_height);
-            self.handle_heartbeat(block_height, events).await?;
+            let block = result?;
+            tracing::info!("Handle block height {}", block.header.height());
+            self.handle_heartbeat(block).await?;
         }
 
         let checkpoint_height_after_sync = *self.checkpoint_height.borrow();
@@ -225,11 +241,8 @@ where
         Ok(())
     }
 
-    async fn handle_heartbeat(
-        &mut self,
-        block_height: BlockHeight,
-        events: Vec<TransactionEvent>,
-    ) -> anyhow::Result<()> {
+    async fn handle_heartbeat(&mut self, block: FinalizedBlock) -> anyhow::Result<()> {
+        let block_height = *block.header.height();
         let checkpoint_height = *self.checkpoint_height.borrow();
         let emitted_events = core::mem::take(&mut self.emitted_events);
         self.pending_events.remove(&block_height);
@@ -266,8 +279,19 @@ where
 
         let mut tx = self.storage.write_transaction();
 
+        let receipts = block.receipts;
         tx.storage_as_mut::<Receipts>()
-            .insert(&block_height, &events)?;
+            .insert(&block_height, &receipts)?;
+
+        #[cfg(feature = "blocks-subscription")]
+        let block_event = BlockEvent {
+            header: block.header,
+            transactions: block.transactions,
+        };
+        #[cfg(feature = "blocks-subscription")]
+        tx.storage_as_mut::<Blocks>()
+            .insert(&block_height, &block_event)?;
+
         tx.storage_as_mut::<LastCheckpoint>()
             .insert(&(), &block_height)?;
 
@@ -276,47 +300,49 @@ where
 
         self.checkpoint_height.send_replace(block_height);
 
-        let events_count = events.len();
+        let events_count = receipts.len();
 
-        if events != emitted_events {
+        if receipts != emitted_events {
             // It is possible that we received a heartbeat before we got all pre confirmations.
             // In this case, we can just emit the rest of events.
-            if events.len() > emitted_events.len()
-                && events[..emitted_events.len()] == emitted_events[..]
+            if receipts.len() > emitted_events.len()
+                && receipts[..emitted_events.len()] == emitted_events[..]
             {
-                for event in events.into_iter().skip(emitted_events.len()) {
-                    Self::broadcast_event(&self.broadcast, event.into())?;
+                for event in receipts.into_iter().skip(emitted_events.len()) {
+                    Self::broadcast_event(&self.broadcast_receipts, event.into())?;
                 }
             } else {
                 if !emitted_events.is_empty() {
                     tracing::warn!(
-                        "Received heartbeat for block height {} with events \
-                            that do not match pending events. \
+                        "Received heartbeat for block height {} with receipts \
+                            that do not match pending receipts. \
                             Emitted events: {:?}, Received events count: {:?}",
                         block_height,
                         emitted_events,
-                        events
+                        receipts
                     );
 
                     Self::broadcast_event(
-                        &self.broadcast,
-                        ServiceEvent::Rollback(block_height),
+                        &self.broadcast_receipts,
+                        UnstableReceipts::Rollback(block_height),
                     )?;
                 }
 
-                for event in events {
-                    Self::broadcast_event(&self.broadcast, event.into())?;
+                for event in receipts {
+                    Self::broadcast_event(&self.broadcast_receipts, event.into())?;
                 }
             }
         }
 
         Self::broadcast_event(
-            &self.broadcast,
-            ServiceEvent::Checkpoint(CheckpointEvent {
+            &self.broadcast_receipts,
+            UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height,
                 events_count,
             }),
         )?;
+        #[cfg(feature = "blocks-subscription")]
+        let _ = self.broadcast_blocks.send(block_event);
 
         let next_checkpoint_height =
             self.checkpoint_height.borrow().succ().ok_or_else(|| {
@@ -340,7 +366,10 @@ where
         Ok(())
     }
 
-    fn handle_next_event(&mut self, next_event: TransactionEvent) -> anyhow::Result<()> {
+    fn handle_next_event(
+        &mut self,
+        next_event: TransactionReceipts,
+    ) -> anyhow::Result<()> {
         let checkpoint_height = *self.checkpoint_height.borrow();
 
         if next_event.tx_pointer.block_height() <= checkpoint_height {
@@ -386,7 +415,7 @@ where
                 if event_entry.get().tx_pointer == next_tx_pointer {
                     let event = event_entry.remove();
                     self.emitted_events.push(event.clone());
-                    Self::broadcast_event(&self.broadcast, event.into())?;
+                    Self::broadcast_event(&self.broadcast_receipts, event.into())?;
                 } else {
                     break;
                 }
@@ -421,7 +450,7 @@ where
             event = self.event_source.next() => {
                 match event {
                     None => {
-                        match self.fetcher.predicted_events_stream().await {
+                        match self.fetcher.predicted_receipts_stream().await {
                             Ok(stream) => {
                                 self.event_source = stream;
                                 fuel_core_services::TaskNextAction::Continue
@@ -446,7 +475,7 @@ where
             _ = self.heartbeat_liveness.tick() => {
                 tracing::error!("Heartbeat liveness timeout reached, \
                     attempting to reconnect to confirmed events stream.");
-                match self.fetcher.confirmed_events_stream().await {
+                match self.fetcher.finalized_blocks_stream().await {
                     Ok(stream) => {
                         self.heartbeat = stream;
                         self.heartbeat_liveness.reset();
@@ -463,7 +492,7 @@ where
                 self.heartbeat_liveness.reset();
                 match hearbeat {
                     None => {
-                        match self.fetcher.confirmed_events_stream().await {
+                        match self.fetcher.finalized_blocks_stream().await {
                             Ok(stream) => {
                                 self.heartbeat = stream;
                                 self.heartbeat_liveness.reset();
@@ -475,9 +504,9 @@ where
                             }
                         }
                     }
-                    Some((block_height, events)) => {
+                    Some(block) => {
                         // TODO: It is bad idea to have an `await` inside of the `tokio::select!`.
-                        if let Err(e) = self.handle_heartbeat(block_height, events).await {
+                        if let Err(e) = self.handle_heartbeat(block).await {
                             tracing::error!("Failed to handle heartbeat: {}", e);
                             fuel_core_services::TaskNextAction::Stop
                         } else {
@@ -499,7 +528,9 @@ where
 pub struct SharedState<S> {
     starting_height: BlockHeight,
     storage: S,
-    broadcast: broadcast::Sender<ServiceEvent>,
+    broadcast_receipts: broadcast::Sender<UnstableReceipts>,
+    #[cfg(feature = "blocks-subscription")]
+    broadcast_blocks: broadcast::Sender<BlockEvent>,
     checkpoint_height: watch::Receiver<BlockHeight>,
 }
 
@@ -514,7 +545,7 @@ where
     pub async fn await_height(&self, height: BlockHeight) -> anyhow::Result<()> {
         let mut receiver = self.checkpoint_height.clone();
         loop {
-            let current_height = *receiver.borrow();
+            let current_height = *receiver.borrow_and_update();
             if current_height >= height {
                 return Ok(());
             }
@@ -524,10 +555,10 @@ where
         }
     }
 
-    pub async fn events_starting_from(
-        &mut self,
+    pub async fn unstable_receipts_starting_from(
+        &self,
         start_height: BlockHeight,
-    ) -> anyhow::Result<BoxStream<anyhow::Result<ServiceEvent>>> {
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
         use futures::TryStreamExt;
 
         if start_height < self.starting_height {
@@ -538,8 +569,9 @@ where
             ));
         }
 
-        let stream_life_events = BroadcastStream::new(self.broadcast.subscribe());
-        let available_height = *self.checkpoint_height.borrow_and_update();
+        let stream_life_events =
+            BroadcastStream::new(self.broadcast_receipts.subscribe());
+        let available_height = *self.checkpoint_height.borrow();
         // We want to wait for next available height, because `stream_life_events` could be created
         // at the mid of the block, and it will not contain all events for the `available_height`.
         let next_available_height = available_height.succ().ok_or_else(|| {
@@ -574,14 +606,14 @@ where
                 .ok_or_else(|| not_found!(Receipts))?
                 .into_owned();
 
-            let checkpoint_event = ServiceEvent::Checkpoint(CheckpointEvent {
+            let checkpoint_event = UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: next_available_height,
                 events_count: events.len(),
             });
 
             let iter = events
                 .into_iter()
-                .map(ServiceEvent::from)
+                .map(UnstableReceipts::from)
                 .chain(iter::once(checkpoint_event));
 
             Ok::<_, anyhow::Error>(futures::stream::iter(iter.map(Ok)))
@@ -604,14 +636,14 @@ where
                 result
                     .map(|(block_height, events)| {
                         let checkpoint_event =
-                            ServiceEvent::Checkpoint(CheckpointEvent {
+                            UnstableReceipts::Checkpoint(CheckpointEvent {
                                 block_height,
                                 events_count: events.len(),
                             });
 
                         let iter = events
                             .into_iter()
-                            .map(ServiceEvent::from)
+                            .map(UnstableReceipts::from)
                             .chain(iter::once(checkpoint_event));
 
                         futures::stream::iter(iter.map(Ok))
@@ -629,14 +661,108 @@ where
             .into_boxed())
     }
 
-    pub fn events_at(
+    #[cfg(feature = "blocks-subscription")]
+    pub async fn blocks_starting_from(
+        &self,
+        start_height: BlockHeight,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<BlockEvent>>> {
+        if start_height < self.starting_height {
+            return Err(anyhow::anyhow!(
+                "Start height {} is less than the initial starting height {}",
+                start_height,
+                self.starting_height
+            ));
+        }
+
+        let stream_life_events = BroadcastStream::new(self.broadcast_blocks.subscribe());
+        let available_height = *self.checkpoint_height.borrow();
+        // We want to wait for next available height, because `stream_life_events` could be created
+        // at the mid of the block, and it will not contain all events for the `available_height`.
+        let next_available_height = available_height.succ().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to increment available height from {}",
+                available_height
+            )
+        })?;
+
+        let next_next_available_height_life_stream = stream_life_events
+            .map(|result| {
+                result.map_err(|e| anyhow::anyhow!("Broadcast stream error: {}", e))
+            })
+            .skip_while(move |event| {
+                let skip = match event {
+                    Ok(event) => event.header.height() <= &next_available_height,
+                    Err(_) => {
+                        // In the case of error we want to propagate it, so no skipping
+                        false
+                    }
+                };
+                async move { skip }
+            });
+
+        let shared_state = self.clone();
+        let storage = self.storage.clone().into_transaction();
+        let next_available_height_events = futures::stream::once(async move {
+            shared_state.await_height(next_available_height).await?;
+            let event = storage
+                .storage_as_ref::<Blocks>()
+                .get(&next_available_height)?
+                .ok_or_else(|| not_found!(Receipts))?
+                .into_owned();
+
+            Ok::<_, anyhow::Error>(event)
+        });
+
+        let storage_iter = StorageIterator::from(self.storage.clone(), |storage| {
+            storage.iter_all_by_start::<Blocks>(
+                Some(&start_height),
+                Some(IterDirection::Forward),
+            )
+        });
+
+        let storage_iter_until_available_height = storage_iter
+            .take_while(move |result| match result {
+                Ok((block_height, _)) => *block_height <= available_height,
+                Err(_) => true,
+            })
+            .map(|result| {
+                result
+                    .map(|(_, event)| event)
+                    .map_err(|e| anyhow::anyhow!("Storage iterator error: {}", e))
+            });
+
+        let storage_iter_until_available_height =
+            futures::stream::iter(storage_iter_until_available_height);
+
+        Ok(storage_iter_until_available_height
+            .chain(next_available_height_events)
+            .chain(next_next_available_height_life_stream)
+            .into_boxed())
+    }
+
+    pub fn receipts_at(
         &self,
         block_height: &BlockHeight,
-    ) -> anyhow::Result<Option<Vec<TransactionEvent>>> {
+    ) -> anyhow::Result<Option<Vec<TransactionReceipts>>> {
         let events = self
             .storage
             .read_transaction()
             .storage_as_ref::<Receipts>()
+            .get(block_height)?
+            .map(|v| v.into_owned());
+
+        Ok(events)
+    }
+
+    #[cfg(feature = "blocks-subscription")]
+    pub fn blocks_at(
+        &self,
+        block_height: &BlockHeight,
+    ) -> anyhow::Result<Option<BlockEvent>> {
+        let events = self
+            .storage
+            .read_transaction()
+            .storage_as_ref::<Blocks>()
             .get(block_height)?
             .map(|v| v.into_owned());
 

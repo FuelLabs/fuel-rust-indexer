@@ -11,7 +11,7 @@ use fuel_core_types::{
     },
     fuel_types::BlockHeight,
 };
-use fuel_indexer_types::events::ServiceEvent;
+use fuel_indexer_types::events::UnstableReceipts;
 
 pub struct StreamsAdapter<S> {
     receipts: fuel_receipts_manager::service::SharedState<S>,
@@ -30,8 +30,10 @@ where
     async fn events_starting_from(
         &mut self,
         start_height: BlockHeight,
-    ) -> anyhow::Result<BoxStream<anyhow::Result<ServiceEvent>>> {
-        self.receipts.events_starting_from(start_height).await
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
+        self.receipts
+            .unstable_receipts_starting_from(start_height)
+            .await
     }
 }
 

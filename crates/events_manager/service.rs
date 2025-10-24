@@ -26,10 +26,13 @@ use fuel_core_storage::{
         WriteTransaction,
     },
 };
-use fuel_core_types::fuel_types::BlockHeight;
+use fuel_core_types::{
+    fuel_tx::TxPointer,
+    fuel_types::BlockHeight,
+};
 use fuel_indexer_types::events::{
     CheckpointEvent,
-    ServiceEvent,
+    UnstableReceipts,
 };
 use fuel_storage_utils::StorageIterator;
 use futures::StreamExt;
@@ -44,6 +47,12 @@ use tokio::sync::{
 };
 use tokio_stream::wrappers::BroadcastStream;
 
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone, Hash)]
+pub struct TransactionEvents<Event> {
+    pub tx_pointer: TxPointer,
+    pub events: Vec<Event>,
+}
+
 #[derive(
     Debug,
     PartialEq,
@@ -55,7 +64,7 @@ use tokio_stream::wrappers::BroadcastStream;
     Hash,
 )]
 pub enum UnstableEvent<Event> {
-    Events((BlockHeight, Vec<Event>)),
+    Transaction(TransactionEvents<Event>),
     Checkpoint(CheckpointEvent),
     Rollback(BlockHeight),
 }
@@ -63,7 +72,7 @@ pub enum UnstableEvent<Event> {
 impl<Event> UnstableEvent<Event> {
     pub fn block_height(&self) -> BlockHeight {
         match self {
-            UnstableEvent::Events((block_height, _)) => *block_height,
+            UnstableEvent::Transaction(tx) => tx.tx_pointer.block_height(),
             UnstableEvent::Checkpoint(checkpoint) => checkpoint.block_height,
             UnstableEvent::Rollback(height) => *height,
         }
@@ -103,11 +112,13 @@ where
         let (checkpoint_height, checkpoint_height_receiver) =
             watch::channel(checkpoint_height);
 
-        let (broadcast, _) = broadcast::channel(100_000);
+        let (unstable_broadcast, _) = broadcast::channel(100_000);
+        let (stable_broadcast, _) = broadcast::channel(100_000);
         let shared_state = SharedState {
             starting_height,
             storage: storage.clone(),
-            broadcast: Arc::new(broadcast),
+            unstable_broadcast: Arc::new(unstable_broadcast),
+            stable_broadcast: Arc::new(stable_broadcast),
             checkpoint_height: checkpoint_height_receiver,
         };
 
@@ -128,12 +139,13 @@ where
     Processor: super::port::ReceiptsProcessor,
 {
     storage: S,
-    events: Vec<Vec<Processor::Event>>,
+    events: Vec<TransactionEvents<Processor::Event>>,
     processor: Processor,
-    event_source: BoxStream<anyhow::Result<ServiceEvent>>,
+    event_source: BoxStream<anyhow::Result<UnstableReceipts>>,
     streams: StreamsSource,
     checkpoint_height: watch::Sender<BlockHeight>,
-    broadcast: Arc<broadcast::Sender<UnstableEvent<Processor::Event>>>,
+    unstable_broadcast: Arc<broadcast::Sender<UnstableEvent<Processor::Event>>>,
+    stable_broadcast: Arc<broadcast::Sender<TransactionEvents<Processor::Event>>>,
 }
 
 #[async_trait::async_trait]
@@ -177,7 +189,8 @@ where
             event_source: futures::stream::empty().into_boxed(),
             streams,
             checkpoint_height,
-            broadcast: shared_state.broadcast,
+            unstable_broadcast: shared_state.unstable_broadcast,
+            stable_broadcast: shared_state.stable_broadcast,
         };
 
         task.reconnect_service_events_stream().await?;
@@ -192,12 +205,12 @@ where
     S: super::port::Storage,
     StreamsSource: super::port::StreamsSource,
 {
-    fn broadcast_event(&self, event: UnstableEvent<Processor::Event>) {
+    fn broadcast_unstable_event(&self, event: UnstableEvent<Processor::Event>) {
         // Broadcast to internal channel
-        let result = self.broadcast.send(event);
+        let result = self.unstable_broadcast.send(event);
 
         if let Err(err) = result {
-            tracing::warn!("Failed to broadcast event: {}", err);
+            tracing::warn!("Failed to broadcast unstable event: {}", err);
         }
     }
 
@@ -212,7 +225,7 @@ where
         let event_source = self.streams.events_starting_from(starting_height).await?;
 
         self.event_source = event_source;
-        self.broadcast_event(UnstableEvent::Rollback(starting_height));
+        self.broadcast_unstable_event(UnstableEvent::Rollback(starting_height));
         self.events.clear();
 
         Ok(())
@@ -220,7 +233,7 @@ where
 
     async fn handle_service_event(
         &mut self,
-        event: Option<anyhow::Result<ServiceEvent>>,
+        event: Option<anyhow::Result<UnstableReceipts>>,
     ) -> anyhow::Result<()> {
         match event {
             None => {
@@ -237,26 +250,27 @@ where
                     })?;
 
                 match event {
-                    ServiceEvent::TransactionEvent(event) => {
+                    UnstableReceipts::Receipts(receipts) => {
                         let events: Vec<_> = self
                             .processor
                             .process_transaction_receipts(
-                                event.tx_pointer,
-                                event.tx_id,
-                                event.receipts.iter(),
+                                receipts.tx_pointer,
+                                receipts.tx_id,
+                                receipts.receipts.iter(),
                             )
                             .collect();
 
-                        self.events.push(events.clone());
-
-                        assert_eq!(next_block_height, event.tx_pointer.block_height());
-
-                        self.broadcast_event(UnstableEvent::Events((
-                            event.tx_pointer.block_height(),
+                        let tx = TransactionEvents {
+                            tx_pointer: receipts.tx_pointer,
                             events,
-                        )));
+                        };
+                        self.events.push(tx.clone());
+
+                        assert_eq!(next_block_height, receipts.tx_pointer.block_height());
+
+                        self.broadcast_unstable_event(UnstableEvent::Transaction(tx));
                     }
-                    ServiceEvent::Checkpoint(checkpoint) => {
+                    UnstableReceipts::Checkpoint(checkpoint) => {
                         // This may happen when the service was start at the middle of the block
                         // production.
                         if checkpoint.events_count != self.events.len()
@@ -266,9 +280,9 @@ where
                         }
 
                         let total_events_count =
-                            self.events.iter().map(|e| e.len()).sum::<usize>();
+                            self.events.iter().map(|e| e.events.len()).sum::<usize>();
 
-                        self.broadcast_event(UnstableEvent::Checkpoint(
+                        self.broadcast_unstable_event(UnstableEvent::Checkpoint(
                             CheckpointEvent {
                                 block_height: checkpoint.block_height,
                                 events_count: total_events_count,
@@ -287,7 +301,16 @@ where
 
                         self.checkpoint_height.send_replace(next_block_height);
 
-                        self.events.clear();
+                        for events in self.events.drain(..) {
+                            let result = self.stable_broadcast.send(events);
+
+                            if let Err(err) = result {
+                                tracing::warn!(
+                                    "Failed to broadcast stable event: {}",
+                                    err
+                                );
+                            }
+                        }
 
                         tracing::info!(
                             "Checkpoint at height {} with {} events",
@@ -296,8 +319,8 @@ where
                         );
                         tokio::task::yield_now().await;
                     }
-                    ServiceEvent::Rollback(at) => {
-                        self.broadcast_event(UnstableEvent::Rollback(at));
+                    UnstableReceipts::Rollback(at) => {
+                        self.broadcast_unstable_event(UnstableEvent::Rollback(at));
                         self.events.clear();
                     }
                 }
@@ -343,7 +366,8 @@ where
 pub struct SharedState<Event, S> {
     starting_height: BlockHeight,
     storage: S,
-    broadcast: Arc<broadcast::Sender<UnstableEvent<Event>>>,
+    unstable_broadcast: Arc<broadcast::Sender<UnstableEvent<Event>>>,
+    stable_broadcast: Arc<broadcast::Sender<TransactionEvents<Event>>>,
     checkpoint_height: watch::Receiver<BlockHeight>,
 }
 
@@ -369,7 +393,7 @@ where
         }
     }
 
-    pub async fn events_starting_from(
+    pub async fn unstable_events_starting_from(
         &self,
         start_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
@@ -383,7 +407,8 @@ where
             ));
         }
 
-        let stream_life_events = BroadcastStream::new(self.broadcast.subscribe());
+        let stream_life_events =
+            BroadcastStream::new(self.unstable_broadcast.subscribe());
         let available_height = *self.checkpoint_height.borrow();
         // We want to wait for next available height, because `stream_life_events` could be created
         // at the mid of the block, and it will not contain all events for the `available_height`.
@@ -419,7 +444,10 @@ where
                 .ok_or_else(|| not_found!(Events<Event>))?
                 .into_owned();
 
-            let events_count = events.iter().map(|events| events.len()).sum::<usize>();
+            let events_count = events
+                .iter()
+                .map(|events| events.events.len())
+                .sum::<usize>();
 
             let checkpoint_event = UnstableEvent::Checkpoint(CheckpointEvent {
                 block_height: next_available_height,
@@ -428,7 +456,7 @@ where
 
             let iter = events
                 .into_iter()
-                .map(move |events| UnstableEvent::Events((next_available_height, events)))
+                .map(|events| UnstableEvent::Transaction(events))
                 .chain(iter::once(checkpoint_event));
 
             Ok::<_, anyhow::Error>(futures::stream::iter(
@@ -452,8 +480,10 @@ where
             .map(|result| {
                 result
                     .map(|(block_height, events)| {
-                        let events_count =
-                            events.iter().map(|events| events.len()).sum::<usize>();
+                        let events_count = events
+                            .iter()
+                            .map(|events| events.events.len())
+                            .sum::<usize>();
 
                         let checkpoint_event =
                             UnstableEvent::Checkpoint(CheckpointEvent {
@@ -463,9 +493,7 @@ where
 
                         let iter = events
                             .into_iter()
-                            .map(move |events| {
-                                UnstableEvent::Events((block_height, events))
-                            })
+                            .map(|events| UnstableEvent::Transaction(events))
                             .chain(iter::once(checkpoint_event));
 
                         futures::stream::iter(iter.map(Ok::<_, anyhow::Error>))
@@ -483,10 +511,98 @@ where
             .into_boxed())
     }
 
+    pub async fn stable_events_starting_from(
+        &self,
+        start_height: BlockHeight,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<TransactionEvents<Event>>>> {
+        use futures::TryStreamExt;
+
+        if start_height < self.starting_height {
+            return Err(anyhow::anyhow!(
+                "Start height {} is less than the initial starting height {}",
+                start_height,
+                self.starting_height
+            ));
+        }
+
+        let stream_life_events = BroadcastStream::new(self.stable_broadcast.subscribe());
+        let available_height = *self.checkpoint_height.borrow();
+        // We want to wait for next available height, because `stream_life_events` could be created
+        // at the mid of the block, and it will not contain all events for the `available_height`.
+        let next_available_height = available_height.succ().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to increment available height from {}",
+                available_height
+            )
+        })?;
+
+        let next_next_available_height_life_stream = stream_life_events
+            .map(|result| {
+                result.map_err(|e| anyhow::anyhow!("Broadcast stream error: {}", e))
+            })
+            .skip_while(move |event| {
+                let skip = match event {
+                    Ok(event) => event.tx_pointer.block_height() <= next_available_height,
+                    Err(_) => {
+                        // In the case of error we want to propagate it, so no skipping
+                        false
+                    }
+                };
+                async move { skip }
+            });
+
+        let shared_state = self.clone();
+        let storage = self.storage.clone().into_transaction();
+        let next_available_height_events = futures::stream::once(async move {
+            shared_state.await_height(next_available_height).await?;
+            let events = storage
+                .storage_as_ref::<Events<Event>>()
+                .get(&next_available_height)?
+                .ok_or_else(|| not_found!(Events<Event>))?
+                .into_owned();
+
+            Ok::<_, anyhow::Error>(futures::stream::iter(
+                events.into_iter().map(Ok::<_, anyhow::Error>),
+            ))
+        })
+        .try_flatten();
+
+        let storage_iter = StorageIterator::from(self.storage.clone(), |storage| {
+            storage.iter_all_by_start::<Events<Event>>(
+                Some(&start_height),
+                Some(IterDirection::Forward),
+            )
+        });
+
+        let storage_iter_until_available_height = storage_iter
+            .take_while(move |result| match result {
+                Ok((block_height, _)) => *block_height <= available_height,
+                Err(_) => true,
+            })
+            .map(|result| {
+                result
+                    .map(|(_, events)| {
+                        futures::stream::iter(
+                            events.into_iter().map(Ok::<_, anyhow::Error>),
+                        )
+                    })
+                    .map_err(|e| anyhow::anyhow!("Storage iterator error: {}", e))
+            });
+
+        let storage_iter_until_available_height =
+            futures::stream::iter(storage_iter_until_available_height.into_iter())
+                .try_flatten();
+
+        Ok(storage_iter_until_available_height
+            .chain(next_available_height_events)
+            .chain(next_next_available_height_life_stream)
+            .into_boxed())
+    }
+
     pub fn events_at(
         &self,
         block_height: &BlockHeight,
-    ) -> anyhow::Result<Option<Vec<Vec<Event>>>> {
+    ) -> anyhow::Result<Option<Vec<TransactionEvents<Event>>>> {
         let events = self
             .storage
             .read_transaction()

@@ -68,13 +68,13 @@ where
 /// Defines the block of code that parses the `Receipt` into one of the events.
 ///
 /// ```rust
-/// use fuel_indexer::try_parse_events;
+/// use fuel_event_streams::try_parse_events;
 /// use fuels::core::codec::DecoderConfig;
 /// use fuel_core_types::fuel_tx::Receipt;
 ///
 /// fuels::prelude::abigen!(Contract(
 ///     name = "OrderBook",
-///     abi = "crates/indexer/processors/receipt_parser/order-book-abi.json"
+///     abi = "artifacts/order-book-abi.json"
 /// ));
 ///
 /// enum Event {
@@ -131,10 +131,10 @@ mod tests {
 
     fuels::prelude::abigen!(Contract(
         name = "OrderBook",
-        abi = "crates/indexer/processors/receipt_parser/order-book-abi.json"
+        abi = "artifacts/order-book-abi.json"
     ));
 
-    const RECEIPTS_JSON: &str = include_str!("receipt_parser/receipts.json");
+    const RECEIPTS_JSON: &str = include_str!("../../../artifacts/receipts.json");
 
     #[test]
     fn try_parse_event_works() {

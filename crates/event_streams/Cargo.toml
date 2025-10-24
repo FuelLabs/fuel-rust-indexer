@@ -1,5 +1,5 @@
 [package]
-name = "fuel-indexer"
+name = "fuel-event-streams"
 authors = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
@@ -34,4 +34,7 @@ rocksdb = [
     "fuel-core/rocksdb-production",
     "fuel-receipts-manager/rocksdb",
     "fuel-events-manager/rocksdb",
+]
+blocks-subscription = [
+    "fuel-receipts-manager/blocks-subscription"
 ]

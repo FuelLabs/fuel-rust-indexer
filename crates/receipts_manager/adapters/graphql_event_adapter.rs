@@ -1,10 +1,13 @@
-use crate::adapters::{
-    client_ext::{
-        ClientExt,
-        FullBlock,
-        TransactionWithReceipts,
+use crate::{
+    adapters::{
+        client_ext::{
+            ClientExt,
+            FullBlock,
+            TransactionWithReceipts,
+        },
+        concurrent_stream::ConcurrentStream,
     },
-    concurrent_stream::ConcurrentStream,
+    port::FinalizedBlock,
 };
 use fuel_core_client::client::{
     FuelClient,
@@ -12,7 +15,10 @@ use fuel_core_client::client::{
         PageDirection,
         PaginationRequest,
     },
-    schema::tx::TransactionStatus,
+    schema::{
+        block::HeaderVersion,
+        tx::TransactionStatus,
+    },
 };
 use fuel_core_services::stream::{
     BoxStream,
@@ -20,6 +26,14 @@ use fuel_core_services::stream::{
     RefBoxStream,
 };
 use fuel_core_types::{
+    blockchain::header::{
+        ApplicationHeader,
+        BlockHeader,
+        BlockHeaderV1,
+        ConsensusHeader,
+        GeneratedConsensusFields,
+        v1::GeneratedApplicationFieldsV1,
+    },
     fuel_tx::TxPointer,
     fuel_types::BlockHeight,
     services::executor::{
@@ -27,7 +41,7 @@ use fuel_core_types::{
         TransactionExecutionStatus,
     },
 };
-use fuel_indexer_types::events::TransactionEvent;
+use fuel_indexer_types::events::TransactionReceipts;
 use fuels::tx::Receipt;
 use futures::{
     Stream,
@@ -45,6 +59,12 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
+
+#[cfg(feature = "blocks-subscription")]
+use fuel_core_types::{
+    fuel_tx::Transaction,
+    fuel_types::canonical::Deserialize,
+};
 
 #[cfg(test)]
 pub mod tests;
@@ -101,9 +121,9 @@ impl TransactionExecutionExt for TransactionWithReceipts {
 }
 
 impl super::super::port::Fetcher for GraphqlFetcher {
-    async fn predicted_events_stream(
+    async fn predicted_receipts_stream(
         &self,
-    ) -> anyhow::Result<BoxStream<TransactionEvent>> {
+    ) -> anyhow::Result<BoxStream<TransactionReceipts>> {
         let (tx, rx) = broadcast::channel(self.event_capacity.into());
         let client_clone = self.client.clone();
 
@@ -140,7 +160,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
 
                                 // `fuel-core` has a bug where pre confirmations use incorrect tx pointer
                                 let corrected_tx_pointer = TxPointer::new(tx_pointer.block_height(), tx_pointer.tx_index().saturating_sub(1));
-                                let event = TransactionEvent {
+                                let event = TransactionReceipts {
                                     tx_pointer: corrected_tx_pointer,
                                     tx_id: transaction_id,
                                     receipts: Arc::new(receipts),
@@ -177,9 +197,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
         Ok(stream.into_boxed())
     }
 
-    async fn confirmed_events_stream(
-        &self,
-    ) -> anyhow::Result<BoxStream<(BlockHeight, Vec<TransactionEvent>)>> {
+    async fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>> {
         let (tx, rx) = broadcast::channel(self.heartbeat_capacity.into());
         let client_clone = self.client.clone();
 
@@ -199,7 +217,8 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                         let block_height =
                             *import_result.sealed_block.entity.header().height();
 
-                        let mut events = Vec::new();
+                        let mut events =
+                            Vec::with_capacity(import_result.tx_status.len());
 
                         for (i, transaction) in
                             import_result.tx_status.into_iter().enumerate()
@@ -211,7 +230,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                                         .is_mint();
 
                                 if !is_mint {
-                                    let event = TransactionEvent {
+                                    let event = TransactionReceipts {
                                         tx_pointer: TxPointer::new(
                                             block_height,
                                             i as u16,
@@ -225,7 +244,20 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                             }
                         }
 
-                        if tx.send((block_height, events)).is_err() {
+                        let (header, _transactions) =
+                            import_result.sealed_block.entity.into_inner();
+                        #[cfg(feature = "blocks-subscription")]
+                        let transactions =
+                            _transactions.into_iter().map(Arc::new).collect::<Vec<_>>();
+
+                        let block = FinalizedBlock {
+                            header,
+                            #[cfg(feature = "blocks-subscription")]
+                            transactions,
+                            receipts: events,
+                        };
+
+                        if tx.send(block).is_err() {
                             tracing::info!("Heartbeat event channel closed");
                             return;
                         }
@@ -253,10 +285,10 @@ impl super::super::port::Fetcher for GraphqlFetcher {
         Ok(stream.into_boxed())
     }
 
-    fn confirmed_events_for_range(
+    fn finalized_blocks_for_range(
         &self,
         range: RangeInclusive<u32>,
-    ) -> RefBoxStream<'static, anyhow::Result<(BlockHeight, Vec<TransactionEvent>)>> {
+    ) -> RefBoxStream<'static, anyhow::Result<FinalizedBlock>> {
         let blocks_stream = blocks_for_batched(
             self.client.clone(),
             *range.start()..range.end().saturating_add(1),
@@ -265,7 +297,77 @@ impl super::super::port::Fetcher for GraphqlFetcher {
         );
 
         let stream = blocks_stream.filter_map(|block| async move {
-            let block_height: BlockHeight = block.header.height.into();
+            let mut header = match block.header.version {
+                HeaderVersion::V1 => {
+                    let mut default = BlockHeaderV1::default();
+
+                    default.set_application_header(ApplicationHeader {
+                        da_height: block.header.da_height.0.into(),
+                        consensus_parameters_version: block
+                            .header
+                            .consensus_parameters_version
+                            .into(),
+                        state_transition_bytecode_version: block
+                            .header
+                            .state_transition_bytecode_version
+                            .into(),
+                        generated: GeneratedApplicationFieldsV1 {
+                            transactions_count: block.header.transactions_count.into(),
+                            message_receipt_count: block
+                                .header
+                                .message_receipt_count
+                                .into(),
+                            transactions_root: block.header.transactions_root.into(),
+                            message_outbox_root: block.header.message_outbox_root.into(),
+                            event_inbox_root: block.header.event_inbox_root.into(),
+                        },
+                    });
+
+                    BlockHeader::V1(default)
+                }
+                HeaderVersion::V2 => {
+                    return Some(Err(anyhow::anyhow!(
+                        "Unsupported block header version 2"
+                    )));
+                }
+                HeaderVersion::Unknown => {
+                    return Some(Err(anyhow::anyhow!(
+                        "Unsupported block header version: {:?}",
+                        block.header.version
+                    )));
+                }
+            };
+
+            header.set_consensus_header(ConsensusHeader {
+                prev_root: block.header.prev_root.into(),
+                height: block.header.height.0.into(),
+                time: block.header.time.0,
+                generated: GeneratedConsensusFields {
+                    application_hash: Default::default(),
+                },
+            });
+            header.recalculate_metadata();
+
+            let block_height = *header.height();
+
+            #[cfg(feature = "blocks-subscription")]
+            let transactions = block
+                .transactions
+                .iter()
+                .map(|tx| Transaction::from_bytes(&tx.raw_payload.0.0).map(Arc::new))
+                .try_collect::<_, Vec<_>, _>();
+
+            #[cfg(feature = "blocks-subscription")]
+            let transactions = match transactions {
+                Ok(txs) => txs,
+                Err(e) => {
+                    return Some(Err(anyhow::anyhow!(
+                        "Failed to deserialize transaction: {}",
+                        e
+                    )))
+                }
+            };
+
             let iter = block.transactions.into_iter().enumerate().filter_map(
                 move |(i, tx_with_receipts)| {
                     let tx_pointer = TxPointer::new(block_height, i as u16);
@@ -276,7 +378,21 @@ impl super::super::port::Fetcher for GraphqlFetcher {
             );
             let result = iter.try_collect::<_, Vec<_>, _>();
 
-            Some(result.map(|events| (block_height, events)))
+            let events = match result {
+                Ok(events) => events,
+                Err(e) => {
+                    return Some(Err(anyhow::anyhow!("Failed to parse receipts: {}", e)))
+                }
+            };
+
+            let block = FinalizedBlock {
+                header,
+                #[cfg(feature = "blocks-subscription")]
+                transactions,
+                receipts: events,
+            };
+
+            Some(Ok(block))
         });
 
         stream.into_boxed_ref()
@@ -369,7 +485,7 @@ fn parse_receipts(
     is_mint: bool,
     tx_pointer: TxPointer,
     tx_with_receipts: TransactionWithReceipts,
-) -> anyhow::Result<Option<TransactionEvent>> {
+) -> anyhow::Result<Option<TransactionReceipts>> {
     if is_mint {
         return Ok(None);
     }
@@ -377,7 +493,7 @@ fn parse_receipts(
     let tx_id = tx_with_receipts.id.0.0;
     let receipts = tx_with_receipts.receipts()?.unwrap_or_default();
 
-    let event = TransactionEvent {
+    let event = TransactionReceipts {
         tx_pointer,
         tx_id,
         receipts,

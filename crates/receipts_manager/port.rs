@@ -7,9 +7,18 @@ use fuel_core_storage::{
     iter::IterableStore,
     kv_store::KeyValueInspect,
 };
-use fuel_core_types::fuel_types::BlockHeight;
-use fuel_indexer_types::events::TransactionEvent;
+use fuel_core_types::{
+    blockchain::header::BlockHeader,
+    fuel_types::BlockHeight,
+};
+use fuel_indexer_types::events::TransactionReceipts;
 use fuel_storage_utils::CommitLazyChanges;
+
+#[cfg(feature = "blocks-subscription")]
+use std::sync::Arc;
+
+#[cfg(feature = "blocks-subscription")]
+use fuel_core_types::fuel_tx::Transaction;
 
 pub trait Storage:
     CommitLazyChanges
@@ -33,30 +42,34 @@ impl<T> Storage for T where
 {
 }
 
+#[derive(Clone)]
+pub struct FinalizedBlock {
+    pub header: BlockHeader,
+    #[cfg(feature = "blocks-subscription")]
+    pub transactions: Vec<Arc<Transaction>>,
+    pub receipts: Vec<TransactionReceipts>,
+}
+
 pub trait Fetcher: Send + Sync + 'static {
-    /// Returns a realtime stream of predicted events.
-    /// Doesn't guarantee that events are final.
-    fn predicted_events_stream(
+    /// Returns a realtime stream of predicted receipts.
+    /// Doesn't guarantee that receipts are final.
+    fn predicted_receipts_stream(
         &self,
-    ) -> impl Future<Output = anyhow::Result<BoxStream<TransactionEvent>>> + Send;
+    ) -> impl Future<Output = anyhow::Result<BoxStream<TransactionReceipts>>> + Send;
 
-    /// Returns a realtime stream of confirmed(finalized unchangeable) events.
-    /// Events are grouped together based how they were confirmed.
-    fn confirmed_events_stream(
+    /// Returns a realtime stream of finalized blocks.
+    fn finalized_blocks_stream(
         &self,
-    ) -> impl Future<
-        Output = anyhow::Result<BoxStream<(BlockHeight, Vec<TransactionEvent>)>>,
-    > + Send;
+    ) -> impl Future<Output = anyhow::Result<BoxStream<FinalizedBlock>>> + Send;
 
-    /// Returns stream of confirmed(finalized unchangeable) events for provided range.
-    /// Events are grouped together based how they were confirmed.
+    /// Returns stream of finalized blocks for provided range.
     ///
     /// Returns an error if the range is higher than `last_height`.
     #[allow(clippy::type_complexity)]
-    fn confirmed_events_for_range(
+    fn finalized_blocks_for_range(
         &self,
         range: std::ops::RangeInclusive<u32>,
-    ) -> RefBoxStream<'static, anyhow::Result<(BlockHeight, Vec<TransactionEvent>)>>;
+    ) -> RefBoxStream<'static, anyhow::Result<FinalizedBlock>>;
 
     /// Returns the last available height of the events.
     fn last_height(&self) -> impl Future<Output = anyhow::Result<BlockHeight>> + Send;

@@ -1,4 +1,7 @@
-use crate::port::StorableEvent;
+use crate::{
+    port::StorableEvent,
+    service::TransactionEvents,
+};
 use fuel_core_storage::{
     Mappable,
     blueprint::plain::Plain,
@@ -59,7 +62,7 @@ where
     type Key = Self::OwnedKey;
     type OwnedKey = BlockHeight;
     type Value = Self::OwnedValue;
-    type OwnedValue = Vec<Vec<Event>>;
+    type OwnedValue = Vec<TransactionEvents<Event>>;
 }
 
 impl<Event> TableWithBlueprint for Events<Event>
