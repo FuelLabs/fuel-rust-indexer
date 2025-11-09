@@ -16,7 +16,10 @@ use fuel_core_client::client::{
         PaginationRequest,
     },
     schema::{
-        block::HeaderVersion,
+        block::{
+            Consensus as ClientConsensus,
+            HeaderVersion,
+        },
         tx::TransactionStatus,
     },
 };
@@ -60,6 +63,10 @@ use std::{
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
+use fuel_core_types::{
+    blockchain::consensus::Consensus,
+    fuel_tx::Input,
+};
 #[cfg(feature = "blocks-subscription")]
 use fuel_core_types::{
     fuel_tx::Transaction,
@@ -244,6 +251,23 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                             }
                         }
 
+                        let block_id = import_result.sealed_block.entity.header().id();
+                        let producer = match import_result.sealed_block.consensus {
+                            Consensus::Genesis(_) => None,
+                            Consensus::PoA(poa_data) => {
+                                let public_key = poa_data
+                                    .signature
+                                    .recover(block_id.as_message())
+                                    .ok();
+
+                                public_key.as_ref().map(Input::owner)
+                            }
+                            _ => {
+                                tracing::warn!("Unexpected consensus message");
+                                None
+                            }
+                        };
+
                         let (header, _transactions) =
                             import_result.sealed_block.entity.into_inner();
                         #[cfg(feature = "blocks-subscription")]
@@ -252,6 +276,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
 
                         let block = FinalizedBlock {
                             header,
+                            producer,
                             #[cfg(feature = "blocks-subscription")]
                             transactions,
                             receipts: events,
@@ -348,6 +373,17 @@ impl super::super::port::Fetcher for GraphqlFetcher {
             });
             header.recalculate_metadata();
 
+            let message = header.id().into_message();
+            let producer = match &block.consensus {
+                ClientConsensus::Genesis(_) => Some(Default::default()),
+                ClientConsensus::PoAConsensus(poa) => {
+                    let signature = poa.signature.clone().into_signature();
+                    let producer_pub_key = signature.recover(&message);
+                    producer_pub_key.ok().as_ref().map(Input::owner)
+                }
+                ClientConsensus::Unknown => None,
+            };
+
             let block_height = *header.height();
 
             #[cfg(feature = "blocks-subscription")]
@@ -387,6 +423,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
 
             let block = FinalizedBlock {
                 header,
+                producer,
                 #[cfg(feature = "blocks-subscription")]
                 transactions,
                 receipts: events,

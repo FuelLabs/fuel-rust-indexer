@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn process_iter__for_empty_receipts_yields_empty_results() {
-        let processor = ReceiptProcessor::new(MockReceiptParser::default());
+        let processor = ReceiptProcessor::new(MockReceiptParser);
 
         let receipts: Vec<Receipt> = vec![];
 
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn process_iter__returns_balance_changes_for_transfer_receipts() {
-        let processor = ReceiptProcessor::new(MockReceiptParser::default());
+        let processor = ReceiptProcessor::new(MockReceiptParser);
 
         let contract_in_id = ContractId::new([1; 32]);
         let contract_out_id = ContractId::new([2; 32]);
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn process_iter__for_non_empty_other_receipts_yields_empty_results() {
-        let processor = ReceiptProcessor::new(MockReceiptParser::default());
+        let processor = ReceiptProcessor::new(MockReceiptParser);
 
         let burn_receipt = Receipt::Burn {
             sub_id: Default::default(),

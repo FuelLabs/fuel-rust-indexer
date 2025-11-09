@@ -108,6 +108,7 @@ macro_rules! try_parse_events {
         };
 
         #[allow(unused_variables)]
+        #[allow(clippy::redundant_locals)]
         // Allow user to have an access to the `contract_id` if they want.
         let contract_id = contract_id;
 

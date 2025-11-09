@@ -15,6 +15,7 @@ use fuel_core_client::client::{
         TransactionId,
         block::{
             BlockByHeightArgsFields,
+            Consensus,
             Header,
         },
         schema,
@@ -62,6 +63,7 @@ pub struct FullBlockByHeightQuery {
 #[cynic(schema_path = "./target/schema.sdl", graphql_type = "Block")]
 pub struct FullBlock {
     pub header: Header,
+    pub consensus: Consensus,
     pub transactions: Vec<TransactionWithReceipts>,
 }
 

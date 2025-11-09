@@ -14,11 +14,11 @@ use fuel_core_types::{
 use fuel_indexer_types::events::TransactionReceipts;
 use fuel_storage_utils::CommitLazyChanges;
 
-#[cfg(feature = "blocks-subscription")]
-use std::sync::Arc;
-
+use fuel_core_types::fuel_tx::Address;
 #[cfg(feature = "blocks-subscription")]
 use fuel_core_types::fuel_tx::Transaction;
+#[cfg(feature = "blocks-subscription")]
+use std::sync::Arc;
 
 pub trait Storage:
     CommitLazyChanges
@@ -45,6 +45,7 @@ impl<T> Storage for T where
 #[derive(Clone)]
 pub struct FinalizedBlock {
     pub header: BlockHeader,
+    pub producer: Option<Address>,
     #[cfg(feature = "blocks-subscription")]
     pub transactions: Vec<Arc<Transaction>>,
     pub receipts: Vec<TransactionReceipts>,

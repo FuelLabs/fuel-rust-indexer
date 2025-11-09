@@ -7,7 +7,10 @@ use fuel_core_types::{
         TxId,
         TxPointer,
     },
-    fuel_types::BlockHeight,
+    fuel_types::{
+        Address,
+        BlockHeight,
+    },
 };
 use std::sync::Arc;
 
@@ -78,5 +81,7 @@ impl<Event> BlockChainEvent<Event> {
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone)]
 pub struct BlockEvent {
     pub header: BlockHeader,
+    pub producer: Option<Address>,
     pub transactions: Vec<Arc<Transaction>>,
+    pub receipts: Vec<TransactionReceipts>,
 }

@@ -286,7 +286,9 @@ where
         #[cfg(feature = "blocks-subscription")]
         let block_event = BlockEvent {
             header: block.header,
+            producer: block.producer,
             transactions: block.transactions,
+            receipts: receipts.clone(),
         };
         #[cfg(feature = "blocks-subscription")]
         tx.storage_as_mut::<Blocks>()
