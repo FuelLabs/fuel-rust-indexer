@@ -8,13 +8,15 @@ use fuel_core_storage::{
     kv_store::KeyValueInspect,
 };
 use fuel_core_types::{
-    blockchain::header::BlockHeader,
+    blockchain::{
+        consensus::Consensus,
+        header::BlockHeader,
+    },
     fuel_types::BlockHeight,
 };
 use fuel_indexer_types::events::TransactionReceipts;
 use fuel_storage_utils::CommitLazyChanges;
 
-use fuel_core_types::fuel_tx::Address;
 #[cfg(feature = "blocks-subscription")]
 use fuel_core_types::fuel_tx::Transaction;
 #[cfg(feature = "blocks-subscription")]
@@ -45,7 +47,7 @@ impl<T> Storage for T where
 #[derive(Clone)]
 pub struct FinalizedBlock {
     pub header: BlockHeader,
-    pub producer: Option<Address>,
+    pub consensus: Consensus,
     #[cfg(feature = "blocks-subscription")]
     pub transactions: Vec<Arc<Transaction>>,
     pub receipts: Vec<TransactionReceipts>,

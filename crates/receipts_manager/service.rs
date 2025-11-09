@@ -286,7 +286,7 @@ where
         #[cfg(feature = "blocks-subscription")]
         let block_event = BlockEvent {
             header: block.header,
-            producer: block.producer,
+            consensus: block.consensus,
             transactions: block.transactions,
             receipts: receipts.clone(),
         };
