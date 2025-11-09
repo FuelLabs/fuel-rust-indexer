@@ -31,10 +31,11 @@ use fuel_core_storage::{
 use fuel_core_types::{
     fuel_tx::TxPointer,
     fuel_types::BlockHeight,
+    services::executor::TransactionExecutionResult,
 };
 use fuel_indexer_types::events::{
     CheckpointEvent,
-    TransactionReceipts,
+    SuccessfulTransactionReceipts,
     UnstableReceipts,
 };
 use fuel_storage_utils::StorageIterator;
@@ -115,12 +116,12 @@ where
 
 pub struct Task<S, F> {
     storage: S,
-    event_source: BoxStream<TransactionReceipts>,
+    event_source: BoxStream<SuccessfulTransactionReceipts>,
     fetcher: F,
     heartbeat: BoxStream<FinalizedBlock>,
     heartbeat_liveness: tokio::time::Interval,
-    emitted_events: Vec<TransactionReceipts>,
-    pending_events: BTreeMap<BlockHeight, BTreeMap<u16, TransactionReceipts>>,
+    emitted_events: Vec<SuccessfulTransactionReceipts>,
+    pending_events: BTreeMap<BlockHeight, BTreeMap<u16, SuccessfulTransactionReceipts>>,
     checkpoint_height: watch::Sender<BlockHeight>,
     broadcast_receipts: broadcast::Sender<UnstableReceipts>,
     #[cfg(feature = "blocks-subscription")]
@@ -279,16 +280,39 @@ where
 
         let mut tx = self.storage.write_transaction();
 
-        let receipts = block.receipts;
+        let statuses = block.statuses;
+        let mut success_receipts = statuses
+            .iter()
+            .enumerate()
+            .filter_map(|(tx_index, status)| {
+                let receipts = match &status.result {
+                    TransactionExecutionResult::Success { receipts, .. } => {
+                        receipts.clone()
+                    }
+                    TransactionExecutionResult::Failed { .. } => return None,
+                };
+
+                let tx_with_receipts = SuccessfulTransactionReceipts {
+                    tx_pointer: TxPointer::new(block_height, tx_index as u16),
+                    tx_id: status.id,
+                    receipts,
+                };
+                Some(tx_with_receipts)
+            })
+            .collect::<Vec<_>>();
+
+        // Remove receipts from `Mint` transactions, as they are not relevant for the indexer.
+        success_receipts.pop();
+
         tx.storage_as_mut::<Receipts>()
-            .insert(&block_height, &receipts)?;
+            .insert(&block_height, &success_receipts)?;
 
         #[cfg(feature = "blocks-subscription")]
         let block_event = BlockEvent {
             header: block.header,
             consensus: block.consensus,
             transactions: block.transactions,
-            receipts: receipts.clone(),
+            statuses,
         };
         #[cfg(feature = "blocks-subscription")]
         tx.storage_as_mut::<Blocks>()
@@ -302,15 +326,15 @@ where
 
         self.checkpoint_height.send_replace(block_height);
 
-        let events_count = receipts.len();
+        let events_count = success_receipts.len();
 
-        if receipts != emitted_events {
+        if success_receipts != emitted_events {
             // It is possible that we received a heartbeat before we got all pre confirmations.
             // In this case, we can just emit the rest of events.
-            if receipts.len() > emitted_events.len()
-                && receipts[..emitted_events.len()] == emitted_events[..]
+            if success_receipts.len() > emitted_events.len()
+                && success_receipts[..emitted_events.len()] == emitted_events[..]
             {
-                for event in receipts.into_iter().skip(emitted_events.len()) {
+                for event in success_receipts.into_iter().skip(emitted_events.len()) {
                     Self::broadcast_event(&self.broadcast_receipts, event.into())?;
                 }
             } else {
@@ -321,7 +345,7 @@ where
                             Emitted events: {:?}, Received events count: {:?}",
                         block_height,
                         emitted_events,
-                        receipts
+                        success_receipts
                     );
 
                     Self::broadcast_event(
@@ -330,7 +354,7 @@ where
                     )?;
                 }
 
-                for event in receipts {
+                for event in success_receipts {
                     Self::broadcast_event(&self.broadcast_receipts, event.into())?;
                 }
             }
@@ -370,7 +394,7 @@ where
 
     fn handle_next_event(
         &mut self,
-        next_event: TransactionReceipts,
+        next_event: SuccessfulTransactionReceipts,
     ) -> anyhow::Result<()> {
         let checkpoint_height = *self.checkpoint_height.borrow();
 
@@ -745,7 +769,7 @@ where
     pub fn receipts_at(
         &self,
         block_height: &BlockHeight,
-    ) -> anyhow::Result<Option<Vec<TransactionReceipts>>> {
+    ) -> anyhow::Result<Option<Vec<SuccessfulTransactionReceipts>>> {
         let events = self
             .storage
             .read_transaction()

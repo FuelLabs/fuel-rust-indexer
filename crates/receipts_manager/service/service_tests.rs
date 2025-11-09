@@ -91,7 +91,7 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     assert_eq!(
         result,
         vec![
-            UnstableReceipts::Receipts(TransactionReceipts {
+            UnstableReceipts::Receipts(SuccessfulTransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),
@@ -143,7 +143,7 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
     assert_eq!(
         result,
         vec![
-            UnstableReceipts::Receipts(TransactionReceipts {
+            UnstableReceipts::Receipts(SuccessfulTransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),
@@ -203,7 +203,7 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
     assert_eq!(
         result,
         vec![
-            UnstableReceipts::Receipts(TransactionReceipts {
+            UnstableReceipts::Receipts(SuccessfulTransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),

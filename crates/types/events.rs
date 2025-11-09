@@ -11,11 +11,12 @@ use fuel_core_types::{
         TxPointer,
     },
     fuel_types::BlockHeight,
+    services::executor::TransactionExecutionStatus,
 };
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TransactionReceipts {
+pub struct SuccessfulTransactionReceipts {
     pub tx_pointer: TxPointer,
     pub tx_id: TxId,
     pub receipts: Arc<Vec<Receipt>>,
@@ -31,7 +32,7 @@ pub struct CheckpointEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UnstableReceipts {
-    Receipts(TransactionReceipts),
+    Receipts(SuccessfulTransactionReceipts),
     Checkpoint(CheckpointEvent),
     Rollback(BlockHeight),
 }
@@ -46,8 +47,8 @@ impl UnstableReceipts {
     }
 }
 
-impl From<TransactionReceipts> for UnstableReceipts {
-    fn from(event: TransactionReceipts) -> Self {
+impl From<SuccessfulTransactionReceipts> for UnstableReceipts {
+    fn from(event: SuccessfulTransactionReceipts) -> Self {
         UnstableReceipts::Receipts(event)
     }
 }
@@ -78,10 +79,10 @@ impl<Event> BlockChainEvent<Event> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct BlockEvent {
     pub header: BlockHeader,
     pub consensus: Consensus,
     pub transactions: Vec<Arc<Transaction>>,
-    pub receipts: Vec<TransactionReceipts>,
+    pub statuses: Vec<TransactionExecutionStatus>,
 }

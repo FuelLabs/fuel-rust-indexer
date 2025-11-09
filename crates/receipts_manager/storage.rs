@@ -8,7 +8,7 @@ use fuel_core_storage::{
     kv_store::StorageColumn,
     structured_storage::TableWithBlueprint,
 };
-use fuel_indexer_types::events::TransactionReceipts;
+use fuel_indexer_types::events::SuccessfulTransactionReceipts;
 use fuels::types::BlockHeight;
 
 #[cfg(feature = "blocks-subscription")]
@@ -61,7 +61,7 @@ impl Mappable for Receipts {
     type Key = Self::OwnedKey;
     type OwnedKey = BlockHeight;
     type Value = Self::OwnedValue;
-    type OwnedValue = Vec<TransactionReceipts>;
+    type OwnedValue = Vec<SuccessfulTransactionReceipts>;
 }
 
 impl TableWithBlueprint for Receipts {

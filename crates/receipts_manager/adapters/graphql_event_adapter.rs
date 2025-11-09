@@ -3,7 +3,6 @@ use crate::{
         client_ext::{
             ClientExt,
             FullBlock,
-            TransactionWithReceipts,
         },
         concurrent_stream::ConcurrentStream,
     },
@@ -44,7 +43,7 @@ use fuel_core_types::{
         TransactionExecutionStatus,
     },
 };
-use fuel_indexer_types::events::TransactionReceipts;
+use fuel_indexer_types::events::SuccessfulTransactionReceipts;
 use fuels::tx::Receipt;
 use futures::{
     Stream,
@@ -96,42 +95,10 @@ pub struct GraphqlEventAdapterConfig {
     pub blocks_request_concurrency: usize,
 }
 
-trait TransactionExecutionExt {
-    fn receipts(self) -> anyhow::Result<Option<Arc<Vec<Receipt>>>>;
-}
-
-impl TransactionExecutionExt for TransactionExecutionStatus {
-    fn receipts(self) -> anyhow::Result<Option<Arc<Vec<Receipt>>>> {
-        let receipts = match self.result {
-            TransactionExecutionResult::Success { receipts, .. } => Some(receipts),
-            _ => None,
-        };
-
-        Ok(receipts)
-    }
-}
-
-impl TransactionExecutionExt for TransactionWithReceipts {
-    fn receipts(self) -> anyhow::Result<Option<Arc<Vec<Receipt>>>> {
-        let Some(status) = self.status else {
-            return Err(anyhow::anyhow!("Transaction has no status"));
-        };
-        let receipts = match status {
-            TransactionStatus::SuccessStatus(s) => s.receipts,
-            _ => return Ok(None),
-        };
-
-        let receipts: Vec<Receipt> =
-            receipts.into_iter().map(Receipt::try_from).try_collect()?;
-
-        Ok(Some(receipts.into()))
-    }
-}
-
 impl super::super::port::Fetcher for GraphqlFetcher {
     async fn predicted_receipts_stream(
         &self,
-    ) -> anyhow::Result<BoxStream<TransactionReceipts>> {
+    ) -> anyhow::Result<BoxStream<SuccessfulTransactionReceipts>> {
         let (tx, rx) = broadcast::channel(self.event_capacity.into());
         let client_clone = self.client.clone();
 
@@ -168,7 +135,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
 
                                 // `fuel-core` has a bug where pre confirmations use incorrect tx pointer
                                 let corrected_tx_pointer = TxPointer::new(tx_pointer.block_height(), tx_pointer.tx_index().saturating_sub(1));
-                                let event = TransactionReceipts {
+                                let event = SuccessfulTransactionReceipts {
                                     tx_pointer: corrected_tx_pointer,
                                     tx_id: transaction_id,
                                     receipts: Arc::new(receipts),
@@ -222,35 +189,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
             loop {
                 match subscription.next().await {
                     Some(Ok(import_result)) => {
-                        let block_height =
-                            *import_result.sealed_block.entity.header().height();
-
-                        let mut events =
-                            Vec::with_capacity(import_result.tx_status.len());
-
-                        for (i, transaction) in
-                            import_result.tx_status.into_iter().enumerate()
-                        {
-                            let tx_id = transaction.id;
-                            if let Ok(Some(receipts)) = transaction.receipts() {
-                                let is_mint =
-                                    import_result.sealed_block.entity.transactions()[i]
-                                        .is_mint();
-
-                                if !is_mint {
-                                    let event = TransactionReceipts {
-                                        tx_pointer: TxPointer::new(
-                                            block_height,
-                                            i as u16,
-                                        ),
-                                        tx_id,
-                                        receipts,
-                                    };
-
-                                    events.push(event);
-                                }
-                            }
-                        }
+                        let statuses = import_result.tx_status;
 
                         let consensus = import_result.sealed_block.consensus.clone();
 
@@ -265,7 +204,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                             consensus,
                             #[cfg(feature = "blocks-subscription")]
                             transactions,
-                            receipts: events,
+                            statuses,
                         };
 
                         if tx.send(block).is_err() {
@@ -377,8 +316,6 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                 }
             };
 
-            let block_height = *header.height();
-
             #[cfg(feature = "blocks-subscription")]
             let transactions = block
                 .transactions
@@ -397,20 +334,72 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                 }
             };
 
-            let iter = block.transactions.into_iter().enumerate().filter_map(
-                move |(i, tx_with_receipts)| {
-                    let tx_pointer = TxPointer::new(block_height, i as u16);
+            let statuses = block
+                .transactions
+                .into_iter()
+                .map(|tx| match tx.status {
+                    None => {
+                        Err(anyhow::anyhow!("Transaction status is missing for {tx:?}"))
+                    }
+                    Some(status) => match status {
+                        TransactionStatus::SuccessStatus(s) => {
+                            let receipts: Vec<_> = s
+                                .receipts
+                                .into_iter()
+                                .map(Receipt::try_from)
+                                .try_collect()?;
 
-                    parse_receipts(tx_with_receipts.is_mint, tx_pointer, tx_with_receipts)
-                        .transpose()
-                },
-            );
-            let result = iter.try_collect::<_, Vec<_>, _>();
+                            let status = TransactionExecutionStatus {
+                                result: TransactionExecutionResult::Success {
+                                    result: s
+                                        .program_state
+                                        .map(TryInto::try_into)
+                                        .transpose()?,
+                                    receipts: Arc::new(receipts),
+                                    total_gas: s.total_gas.0,
+                                    total_fee: s.total_fee.0,
+                                },
+                                id: tx.id.0.0,
+                            };
 
-            let events = match result {
-                Ok(events) => events,
+                            Ok(status)
+                        }
+                        TransactionStatus::FailureStatus(s) => {
+                            let receipts: Vec<_> = s
+                                .receipts
+                                .into_iter()
+                                .map(Receipt::try_from)
+                                .try_collect()?;
+
+                            let status = TransactionExecutionStatus {
+                                result: TransactionExecutionResult::Failed {
+                                    result: s
+                                        .program_state
+                                        .map(TryInto::try_into)
+                                        .transpose()?,
+                                    receipts: Arc::new(receipts),
+                                    total_gas: s.total_gas.0,
+                                    total_fee: s.total_fee.0,
+                                },
+                                id: tx.id.0.0,
+                            };
+
+                            Ok(status)
+                        }
+                        _ => Err(anyhow::anyhow!(
+                            "Unsupported transaction status variant: {status:?}"
+                        )),
+                    },
+                })
+                .try_collect::<_, Vec<_>, _>();
+
+            let statuses = match statuses {
+                Ok(statuses) => statuses,
                 Err(e) => {
-                    return Some(Err(anyhow::anyhow!("Failed to parse receipts: {}", e)))
+                    return Some(Err(anyhow::anyhow!(
+                        "Failed to parse transaction statuses: {}",
+                        e
+                    )))
                 }
             };
 
@@ -419,7 +408,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                 consensus,
                 #[cfg(feature = "blocks-subscription")]
                 transactions,
-                receipts: events,
+                statuses,
             };
 
             Some(Ok(block))
@@ -509,25 +498,4 @@ pub async fn blocks_for(
     };
     let response = client.full_blocks(request).await?;
     Ok(response.results)
-}
-
-fn parse_receipts(
-    is_mint: bool,
-    tx_pointer: TxPointer,
-    tx_with_receipts: TransactionWithReceipts,
-) -> anyhow::Result<Option<TransactionReceipts>> {
-    if is_mint {
-        return Ok(None);
-    }
-
-    let tx_id = tx_with_receipts.id.0.0;
-    let receipts = tx_with_receipts.receipts()?.unwrap_or_default();
-
-    let event = TransactionReceipts {
-        tx_pointer,
-        tx_id,
-        receipts,
-    };
-
-    Ok(Some(event))
 }
