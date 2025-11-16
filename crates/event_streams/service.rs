@@ -151,7 +151,7 @@ where
         &self.events
     }
 
-    pub fn _receipts(&self) -> &fuel_receipts_manager::service::SharedState<RS> {
+    pub fn receipts(&self) -> &fuel_receipts_manager::service::SharedState<RS> {
         &self.receipts
     }
 
