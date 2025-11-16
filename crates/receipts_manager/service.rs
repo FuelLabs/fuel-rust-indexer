@@ -701,6 +701,16 @@ where
         Ok(storage_iter_until_available_height
             .chain(next_available_height_events)
             .chain(next_next_available_height_life_stream)
+            .skip_while(move |event| {
+                let skip = match event {
+                    Ok(event) => event.block_height() < start_height,
+                    Err(_) => {
+                        // In the case of error we want to propagate it, so no skipping
+                        false
+                    }
+                };
+                async move { skip }
+            })
             .into_boxed())
     }
 
@@ -780,6 +790,16 @@ where
         Ok(storage_iter_until_available_height
             .chain(next_available_height_events)
             .chain(next_next_available_height_life_stream)
+            .skip_while(move |event| {
+                let skip = match event {
+                    Ok(event) => event.header.height() < &start_height,
+                    Err(_) => {
+                        // In the case of error we want to propagate it, so no skipping
+                        false
+                    }
+                };
+                async move { skip }
+            })
             .into_boxed())
     }
 
