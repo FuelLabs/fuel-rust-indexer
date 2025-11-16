@@ -56,6 +56,10 @@ use tokio_stream::wrappers::BroadcastStream;
 
 #[cfg(feature = "blocks-subscription")]
 use crate::storage::Blocks;
+#[cfg(not(feature = "blocks-subscription"))]
+use crate::storage::Headers;
+#[cfg(not(feature = "blocks-subscription"))]
+use fuel_core_types::blockchain::header::BlockHeader;
 #[cfg(feature = "blocks-subscription")]
 use fuel_indexer_types::events::BlockEvent;
 
@@ -327,6 +331,9 @@ where
         #[cfg(feature = "blocks-subscription")]
         tx.storage_as_mut::<Blocks>()
             .insert(&block_height, &block_event)?;
+        #[cfg(not(feature = "blocks-subscription"))]
+        tx.storage_as_mut::<Headers>()
+            .insert(&block_height, &block.header)?;
 
         tx.storage_as_mut::<LastCheckpoint>()
             .insert(&(), &block_height)?;
@@ -803,6 +810,21 @@ where
             .map(|v| v.into_owned());
 
         Ok(events)
+    }
+
+    #[cfg(not(feature = "blocks-subscription"))]
+    pub fn header_at(
+        &self,
+        block_height: &BlockHeight,
+    ) -> anyhow::Result<Option<BlockHeader>> {
+        let header = self
+            .storage
+            .read_transaction()
+            .storage_as_ref::<Headers>()
+            .get(block_height)?
+            .map(|v| v.into_owned());
+
+        Ok(header)
     }
 }
 

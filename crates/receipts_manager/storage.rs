@@ -11,6 +11,8 @@ use fuel_core_storage::{
 use fuel_indexer_types::events::SuccessfulTransactionReceipts;
 use fuels::types::BlockHeight;
 
+#[cfg(not(feature = "blocks-subscription"))]
+use fuel_core_types::blockchain::header::BlockHeader;
 #[cfg(feature = "blocks-subscription")]
 use fuel_indexer_types::events::BlockEvent;
 
@@ -32,6 +34,8 @@ pub enum Column {
     Receipts = 2,
     #[cfg(feature = "blocks-subscription")]
     Blocks = 3,
+    #[cfg(not(feature = "blocks-subscription"))]
+    Headers = 4,
 }
 
 impl Column {
@@ -70,6 +74,27 @@ impl TableWithBlueprint for Receipts {
 
     fn column() -> Self::Column {
         Column::Receipts
+    }
+}
+
+#[cfg(not(feature = "blocks-subscription"))]
+pub struct Headers;
+
+#[cfg(not(feature = "blocks-subscription"))]
+impl Mappable for Headers {
+    type Key = Self::OwnedKey;
+    type OwnedKey = BlockHeight;
+    type Value = Self::OwnedValue;
+    type OwnedValue = BlockHeader;
+}
+
+#[cfg(not(feature = "blocks-subscription"))]
+impl TableWithBlueprint for Headers {
+    type Blueprint = Plain<Primitive<4>, Postcard>;
+    type Column = Column;
+
+    fn column() -> Self::Column {
+        Column::Headers
     }
 }
 

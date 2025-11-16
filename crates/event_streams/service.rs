@@ -62,7 +62,7 @@ impl Config {
 #[derive(Clone)]
 pub struct SharedState<Event, ES, RS> {
     events: fuel_events_manager::service::SharedState<Event, ES>,
-    _receipts: fuel_receipts_manager::service::SharedState<RS>,
+    receipts: fuel_receipts_manager::service::SharedState<RS>,
 }
 
 pub struct Task<Processor, ES, RS>
@@ -90,7 +90,7 @@ where
     fn shared_data(&self) -> Self::SharedData {
         SharedState {
             events: self.events_manager.shared.clone(),
-            _receipts: self.receipts_manager.shared.clone(),
+            receipts: self.receipts_manager.shared.clone(),
         }
     }
 
@@ -147,6 +147,14 @@ where
     ES: fuel_events_manager::port::Storage,
     RS: fuel_receipts_manager::port::Storage,
 {
+    pub fn events(&self) -> &fuel_events_manager::service::SharedState<Event, ES> {
+        &self.events
+    }
+
+    pub fn _receipts(&self) -> &fuel_receipts_manager::service::SharedState<RS> {
+        &self.receipts
+    }
+
     pub async fn stable_events_starting_from(
         &self,
         starting_block_height: BlockHeight,
@@ -170,7 +178,7 @@ where
         &self,
         starting_block_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<BlockEvent>>> {
-        self._receipts
+        self.receipts
             .blocks_starting_from(starting_block_height)
             .await
     }
