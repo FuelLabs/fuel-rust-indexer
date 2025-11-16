@@ -96,21 +96,39 @@ where
 /// ```
 #[macro_export]
 macro_rules! try_parse_events {
-    ([$decoding_config:ident, $receipt:ident] $($event_ty:ty => |$e:ident| $handler:block),*) => {{
+    ([$decoding_config:ident, $receipt:ident, $contract:ident] $($event_ty:ty => |$e:ident| $handler:block),*) => {{
         // Force compilation error if type is incorrect
         let _: &$crate::fuels::core::codec::DecoderConfig = &$decoding_config;
         let _: &$crate::fuel_core_types::fuel_tx::Receipt = &$receipt;
 
-        let (receipt_log_id, contract_id) = match $receipt {
+        let (receipt_log_id, $contract) = match $receipt {
             Receipt::LogData { rb, id, .. } => (*rb, *id),
             Receipt::Log { rb, id, .. } => (*rb, *id),
             _ => return None,
         };
 
-        #[allow(unused_variables)]
-        #[allow(clippy::redundant_locals)]
-        // Allow user to have an access to the `contract_id` if they want.
-        let contract_id = contract_id;
+        match receipt_log_id {
+            $(<$event_ty as $crate::fuels::core::codec::Log>::LOG_ID_U64 => {
+                // TODO: Parse in a more optimal way
+                let event = $crate::processors::receipt_parser::try_parse_event::<$event_ty>($decoding_config, $receipt)?;
+
+                let handler = |$e: $event_ty| $handler;
+
+                handler(event)
+            }),*
+            _ => None
+        }
+    }};
+    ([$decoding_config:ident, $receipt:ident] $($event_ty:ty => |$e:ident| $handler:block),*) => {{
+        // Force compilation error if type is incorrect
+        let _: &$crate::fuels::core::codec::DecoderConfig = &$decoding_config;
+        let _: &$crate::fuel_core_types::fuel_tx::Receipt = &$receipt;
+
+        let receipt_log_id = match $receipt {
+            Receipt::LogData { rb, .. } => *rb,
+            Receipt::Log { rb, .. } => *rb,
+            _ => return None,
+        };
 
         match receipt_log_id {
             $(<$event_ty as $crate::fuels::core::codec::Log>::LOG_ID_U64 => {
