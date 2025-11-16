@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/event_streams",
     "crates/events_manager",
     "crates/receipts_manager",
     "crates/storage_utils",
     "crates/types",
-    "crates/event_streams",
     "tests",
 ]
 
@@ -19,28 +19,29 @@ readme = "README.md"
 version = "0.0.1"
 
 [workspace.dependencies]
-async-trait = { version = "0.1" }
 anyhow = "1.0.66"
+async-trait = { version = "0.1" }
+clap = { version = "4.5.51", default-features = false, features = ["derive"] }
 enum-iterator = { version = "1.2" }
 fuel-core = { version = "0.47.1" }
+fuel-core-chain-config = { version = "0.47.1" }
 fuel-core-client = { version = "0.47.1" }
 fuel-core-services = { version = "0.47.1" }
 fuel-core-storage = { version = "0.47.1" }
 fuel-core-types = { version = "0.47.1" }
-fuel-core-chain-config = { version = "0.47.1" }
+fuel-event-streams = { path = "crates/event_streams" }
 fuel-events-manager = { path = "crates/events_manager" }
+fuel-indexer-types = { path = "crates/types" }
 fuel-receipts-manager = { path = "crates/receipts_manager" }
 fuel-storage-utils = { path = "crates/storage_utils" }
-fuel-indexer-types = { path = "crates/types" }
-fuel-event-streams = { path = "crates/event_streams" }
 fuels = { version = "0.76.0" }
 futures = "0.3"
 serde = { version = "1" }
 strum = { version = "0.25" }
 strum_macros = { version = "0.25" }
+tokio = { version = "1.48.0" }
 tracing = "0.1"
 url = "2"
-tokio = { version = "1.48.0" }
 
 [patch.crates-io]
 fuels = { git = "https://github.com/FuelLabs/fuels-rs/", branch = "feature/log-id-expose" }

@@ -11,16 +11,27 @@ version = { workspace = true }
 [lib]
 path = "lib.rs"
 
+[features]
+rocksdb = [
+    "dep:fuel-core",
+    "fuel-core/rocksdb-production",
+    "fuel-storage-utils/rocksdb",
+]
+blocks-subscription = []
+clap = ["dep:clap"]
+
 [dependencies]
-async-trait = { workspace = true }
 anyhow = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true, optional = true }
 cynic = { version = "3.1.0", features = ["http-reqwest"] }
 enum-iterator = { workspace = true }
+fuel-core = { workspace = true, optional = true }
 fuel-core-client = { workspace = true }
 fuel-core-services = { workspace = true }
 fuel-core-storage = { workspace = true }
-fuel-core = { workspace = true, optional = true }
 fuel-core-types = { workspace = true, features = ["serde", "test-helpers"] }
+fuel-indexer-types = { workspace = true }
 fuel-storage-utils = { workspace = true }
 fuels = { workspace = true, features = ["accounts-signer-aws-kms"] }
 futures = { workspace = true }
@@ -34,21 +45,12 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-stream = { version = "0.1", features = ["full"] }
 tracing = { workspace = true }
 url = { workspace = true }
-fuel-indexer-types = { workspace = true }
 
 [build-dependencies]
 fuel-core-client = { workspace = true }
 
 [dev-dependencies]
 fuel-core = { workspace = true, features = ["test-helpers"] }
-fuel-core-services = { workspace = true, features = ["test-helpers"] }
 fuel-core-chain-config = { workspace = true, features = ["test-helpers"] }
+fuel-core-services = { workspace = true, features = ["test-helpers"] }
 rand = "0.8.2"
-
-[features]
-rocksdb = [
-    "dep:fuel-core",
-    "fuel-core/rocksdb-production",
-    "fuel-storage-utils/rocksdb",
-]
-blocks-subscription = []

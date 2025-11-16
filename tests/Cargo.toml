@@ -13,10 +13,10 @@ publish = false
 path = "mod.rs"
 
 [dev-dependencies]
-fuel-event-streams = { workspace = true, features = ["rocksdb", "blocks-subscription"] }
 fuel-core = { workspace = true, features = ["test-helpers"] }
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+fuel-event-streams = { workspace = true, features = ["rocksdb", "blocks-subscription"] }
 fuels = { workspace = true }
 serde = { workspace = true }
-url = { workspace = true }
 tempdir = "0.3"
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+url = { workspace = true }

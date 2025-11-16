@@ -11,15 +11,11 @@ version = { workspace = true }
 [lib]
 path = "lib.rs"
 
+[features]
+rocksdb = ["dep:fuel-core", "dep:serde", "fuel-core/rocksdb-production"]
+
 [dependencies]
 anyhow = { workspace = true }
 fuel-core = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
 fuel-core-storage = { workspace = true }
-
-[features]
-rocksdb = [
-    "dep:fuel-core",
-    "dep:serde",
-    "fuel-core/rocksdb-production",
-]
+serde = { workspace = true, optional = true }

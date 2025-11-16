@@ -23,11 +23,16 @@ use fuel_indexer_types::events::BlockEvent;
     Debug,
     strum_macros::EnumCount,
     strum_macros::IntoStaticStr,
+    strum_macros::EnumString,
+    strum_macros::EnumVariantNames,
     PartialEq,
     Eq,
     enum_iterator::Sequence,
     Hash,
 )]
+#[strum(serialize_all = "snake_case")]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+#[cfg_attr(feature = "clap", clap(rename_all = "snake_case"))]
 pub enum Column {
     Metadata = 0,
     LastCheckpoint = 1,
