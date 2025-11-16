@@ -3,6 +3,7 @@
 
 pub use fuel_core_types;
 pub use fuel_events_manager;
+pub use fuel_indexer_types;
 pub use fuel_receipts_manager;
 pub use fuels;
 
