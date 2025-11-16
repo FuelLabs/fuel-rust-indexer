@@ -33,6 +33,7 @@ use fuel_indexer_types::events::BlockEvent;
 
 pub struct Config {
     pub starting_block_height: BlockHeight,
+    pub use_preconfirmations: bool,
     pub fuel_graphql_url: Url,
     pub heartbeat_capacity: NonZeroUsize,
     pub event_capacity: NonZeroUsize,
@@ -41,9 +42,14 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(starting_block_height: BlockHeight, url: Url) -> Self {
+    pub fn new(
+        starting_block_height: BlockHeight,
+        use_preconfirmations: bool,
+        url: Url,
+    ) -> Self {
         Self {
             starting_block_height,
+            use_preconfirmations,
             fuel_graphql_url: url,
             heartbeat_capacity: NonZeroUsize::new(1000).expect("Is not zero; qed"),
             event_capacity: NonZeroUsize::new(10000).expect("Is not zero; qed"),
@@ -183,6 +189,7 @@ where
 {
     let Config {
         starting_block_height,
+        use_preconfirmations,
         fuel_graphql_url,
         heartbeat_capacity,
         event_capacity,
@@ -204,6 +211,7 @@ where
 
     let receipts_manager = fuel_receipts_manager::service::new_service(
         starting_block_height,
+        use_preconfirmations,
         receipts_storage,
         fetcher,
     )?;

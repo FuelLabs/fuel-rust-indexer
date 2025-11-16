@@ -119,9 +119,9 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                             fuel_core_client::client::types::TransactionStatus::PreconfirmationFailure {
                                 transaction_id, reason, ..
                             } => {
-                                tracing::error!(
-                                    "Preconfirmation failure for transaction {}: {}",
-                                    transaction_id,
+                                tracing::warn!(
+                                    tx_id = %transaction_id,
+                                    "Preconfirmation failure for transaction: {}",
                                     reason
                                 );
                                 continue;
@@ -151,7 +151,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                         }
                     }
                     Some(Err(err)) => {
-                        tracing::error!("Preconfirmation subscription error: {}", err);
+                        tracing::error!("Preconfirmation subscription error: {err:?}");
                         return;
                     }
                     None => {
@@ -213,7 +213,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
                         }
                     }
                     Some(Err(err)) => {
-                        tracing::error!("Heartbeat subscription error: {}", err);
+                        tracing::error!("Heartbeat subscription error: {err:?}");
                         return;
                     }
                     None => {
@@ -466,10 +466,10 @@ pub fn blocks_for_batched(
 
                 match result {
                     Ok(blocks) => return futures::stream::iter(blocks),
-                    Err(e) => {
+                    Err(err) => {
                         // If there was an error, we can log it and try the next chunk.
                         tracing::error!(
-                            "Error fetching blocks for range {start}..{last}: {e}"
+                            "Error fetching blocks for range {start}..{last}: {err:?}"
                         );
                     }
                 }

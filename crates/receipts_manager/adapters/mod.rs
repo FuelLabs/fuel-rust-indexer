@@ -14,6 +14,7 @@ pub mod resizable_buffered;
 
 pub fn new_service<S, F>(
     starting_block_height: BlockHeight,
+    use_preconfirmations: bool,
     storage: S,
     fetcher: F,
 ) -> anyhow::Result<ReceiptsManager<S, F>>
@@ -21,11 +22,17 @@ where
     S: super::port::Storage,
     F: super::port::Fetcher,
 {
-    crate::service::new_service(starting_block_height, storage, fetcher)
+    crate::service::new_service(
+        starting_block_height,
+        use_preconfirmations,
+        storage,
+        fetcher,
+    )
 }
 
 pub struct ManagerConfig {
     pub starting_block_height: BlockHeight,
+    pub use_preconfirmations: bool,
     pub fuel_graphql_url: Url,
     pub heartbeat_capacity: NonZeroUsize,
     pub event_capacity: NonZeroUsize,
@@ -45,6 +52,7 @@ where
 {
     let ManagerConfig {
         starting_block_height,
+        use_preconfirmations,
         fuel_graphql_url,
         heartbeat_capacity,
         event_capacity,
@@ -63,8 +71,12 @@ where
     let fetcher =
         graphql_event_adapter::create_graphql_event_adapter(graphql_event_adapter_config);
 
-    let event_manager =
-        crate::service::new_service(starting_block_height, storage, fetcher)?;
+    let event_manager = crate::service::new_service(
+        starting_block_height,
+        use_preconfirmations,
+        storage,
+        fetcher,
+    )?;
 
     Ok(event_manager)
 }

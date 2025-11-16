@@ -33,7 +33,7 @@ async fn uninitialized_service__can_be_created() {
     let fetcher = create_graphql_event_adapter(config);
 
     // Given
-    let service = UninitializedService::new(0u32.into(), storage, fetcher).unwrap();
+    let service = UninitializedService::new(0u32.into(), true, storage, fetcher).unwrap();
 
     let mut task = service
         .into_task(&StateWatcher::started(), ())
@@ -69,7 +69,8 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     let fetcher = create_graphql_event_adapter(config);
     let starting_height = 0u32.into();
 
-    let service = UninitializedService::new(starting_height, storage, fetcher).unwrap();
+    let service =
+        UninitializedService::new(starting_height, true, storage, fetcher).unwrap();
     let shared_state = service.shared_data();
     let mut task = service
         .into_task(&StateWatcher::started(), ())
@@ -117,7 +118,8 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
     let fetcher = create_graphql_event_adapter(config);
     let starting_height = 0u32.into();
 
-    let service = UninitializedService::new(starting_height, storage, fetcher).unwrap();
+    let service =
+        UninitializedService::new(starting_height, true, storage, fetcher).unwrap();
     let shared_state = service.shared_data();
     let mut task = service
         .into_task(&StateWatcher::started(), ())
@@ -177,7 +179,8 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
     let fetcher = create_graphql_event_adapter(config);
     let starting_height = 0u32.into();
 
-    let service = UninitializedService::new(starting_height, storage, fetcher).unwrap();
+    let service =
+        UninitializedService::new(starting_height, true, storage, fetcher).unwrap();
     let shared_state = service.shared_data();
     let mut task = service
         .into_task(&StateWatcher::started(), ())
@@ -237,7 +240,8 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     let fetcher = create_graphql_event_adapter(config);
     let starting_height = 0u32.into();
 
-    let service = UninitializedService::new(starting_height, storage, fetcher).unwrap();
+    let service =
+        UninitializedService::new(starting_height, true, storage, fetcher).unwrap();
     let shared_state = service.shared_data();
     let mut task = service
         .into_task(&StateWatcher::started(), ())

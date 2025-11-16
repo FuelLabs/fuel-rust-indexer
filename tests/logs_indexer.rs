@@ -65,7 +65,7 @@ async fn defining_logs_indexer__stable_logs() {
         parse_o2_logs,
         temp_dir.path().to_path_buf(),
         database_config,
-        StreamsConfig::new(0u32.into(), url),
+        StreamsConfig::new(0u32.into(), true, url),
     )
     .unwrap();
     indexer.start_and_await().await.unwrap();
@@ -96,7 +96,7 @@ async fn defining_logs_indexer__unstable_logs() {
         parse_o2_logs,
         temp_dir.path().to_path_buf(),
         database_config,
-        StreamsConfig::new(0u32.into(), url),
+        StreamsConfig::new(0u32.into(), true, url),
     )
     .unwrap();
     indexer.start_and_await().await.unwrap();
@@ -127,7 +127,7 @@ async fn defining_logs_indexer__blocks() {
         parse_o2_logs,
         temp_dir.path().to_path_buf(),
         database_config,
-        StreamsConfig::new(0u32.into(), url),
+        StreamsConfig::new(0u32.into(), true, url),
     )
     .unwrap();
     indexer.start_and_await().await.unwrap();

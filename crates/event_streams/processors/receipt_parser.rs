@@ -50,7 +50,7 @@ where
         {
             Ok(token) => token,
             Err(err) => {
-                tracing::error!("Unable to decode the token from the receipt {err}");
+                tracing::error!("Unable to decode the token from the receipt {err:?}");
                 return None;
             }
         };
@@ -58,7 +58,7 @@ where
         match T::from_token(token) {
             Ok(value) => Some(value),
             Err(err) => {
-                tracing::error!("Unable to decode the token {err}");
+                tracing::error!("Unable to decode the token {err:?}");
                 None
             }
         }

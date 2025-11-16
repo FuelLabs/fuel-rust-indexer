@@ -63,6 +63,7 @@ use fuel_indexer_types::events::BlockEvent;
 mod service_tests;
 
 pub struct UninitializedService<S, F> {
+    use_preconfirmations: bool,
     storage: S,
     event_fetcher: F,
     checkpoint_height: watch::Sender<BlockHeight>,
@@ -76,6 +77,7 @@ where
 {
     pub fn new(
         starting_height: BlockHeight,
+        use_preconfirmations: bool,
         storage: S,
         event_fetcher: F,
     ) -> anyhow::Result<Self> {
@@ -104,6 +106,7 @@ where
         };
 
         let _self = Self {
+            use_preconfirmations,
             storage,
             event_fetcher,
             checkpoint_height,
@@ -153,13 +156,20 @@ where
     ) -> anyhow::Result<Self::Task> {
         let mut state = state.clone();
         let UninitializedService {
+            use_preconfirmations,
             storage,
             event_fetcher,
             checkpoint_height,
             shared_state,
         } = self;
 
-        let event_source = event_fetcher.predicted_receipts_stream().await?;
+        let event_source = if use_preconfirmations {
+            event_fetcher.predicted_receipts_stream().await?
+        } else {
+            tracing::info!("Pre-confirmations are disabled, using empty event source.");
+            futures::stream::pending().into_boxed()
+        };
+
         let heartbeat = event_fetcher.finalized_blocks_stream().await?;
 
         let last_available_height = event_fetcher.last_height().await?;
@@ -488,8 +498,8 @@ where
                         }
                     }
                     Some(event) => {
-                        if let Err(e) = self.handle_next_event(event) {
-                            tracing::error!("Failed to handle next event: {}", e);
+                        if let Err(err) = self.handle_next_event(event) {
+                            tracing::error!("Failed to handle next event: {err:?}");
                             fuel_core_services::TaskNextAction::Stop
                         } else {
                             fuel_core_services::TaskNextAction::Continue
@@ -532,8 +542,8 @@ where
                     }
                     Some(block) => {
                         // TODO: It is bad idea to have an `await` inside of the `tokio::select!`.
-                        if let Err(e) = self.handle_heartbeat(block).await {
-                            tracing::error!("Failed to handle heartbeat: {}", e);
+                        if let Err(err) = self.handle_heartbeat(block).await {
+                            tracing::error!("Failed to handle heartbeat: {err:?}");
                             fuel_core_services::TaskNextAction::Stop
                         } else {
                             fuel_core_services::TaskNextAction::Continue
@@ -800,6 +810,7 @@ pub type ReceiptsManager<S, F> = ServiceRunner<UninitializedService<S, F>>;
 
 pub fn new_service<S, F>(
     starting_height: BlockHeight,
+    use_preconfirmations: bool,
     storage: S,
     fetcher: F,
 ) -> anyhow::Result<ReceiptsManager<S, F>>
@@ -807,6 +818,11 @@ where
     S: super::port::Storage,
     F: super::port::Fetcher,
 {
-    let uninit = UninitializedService::new(starting_height, storage, fetcher)?;
+    let uninit = UninitializedService::new(
+        starting_height,
+        use_preconfirmations,
+        storage,
+        fetcher,
+    )?;
     Ok(ServiceRunner::new(uninit))
 }
