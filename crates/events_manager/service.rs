@@ -27,7 +27,10 @@ use fuel_core_storage::{
     },
 };
 use fuel_core_types::{
-    fuel_tx::TxPointer,
+    fuel_tx::{
+        TxId,
+        TxPointer,
+    },
     fuel_types::BlockHeight,
 };
 use fuel_indexer_types::events::{
@@ -49,6 +52,7 @@ use tokio_stream::wrappers::BroadcastStream;
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone, Hash)]
 pub struct TransactionEvents<Event> {
+    pub tx_id: TxId,
     pub tx_pointer: TxPointer,
     pub events: Vec<Event>,
 }
@@ -261,6 +265,7 @@ where
                             .collect();
 
                         let tx = TransactionEvents {
+                            tx_id: receipts.tx_id,
                             tx_pointer: receipts.tx_pointer,
                             events,
                         };
