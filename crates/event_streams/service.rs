@@ -65,7 +65,7 @@ pub struct SharedState<Event, ES, RS> {
     _receipts: fuel_receipts_manager::service::SharedState<RS>,
 }
 
-pub struct Task<Processor, RS, ES>
+pub struct Task<Processor, ES, RS>
 where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
@@ -76,7 +76,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<Processor, RS, ES> RunnableService for Task<Processor, RS, ES>
+impl<Processor, RS, ES> RunnableService for Task<Processor, ES, RS>
 where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
@@ -109,7 +109,7 @@ where
     }
 }
 
-impl<Processor, RS, ES> RunnableTask for Task<Processor, RS, ES>
+impl<Processor, RS, ES> RunnableTask for Task<Processor, ES, RS>
 where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
@@ -176,12 +176,12 @@ where
     }
 }
 
-pub fn new_service<Processor, RS, ES>(
+pub fn new_service<Processor, ES, RS>(
     config: Config,
     processor: Processor,
     receipts_storage: RS,
     events_storage: ES,
-) -> anyhow::Result<ServiceRunner<Task<Processor, RS, ES>>>
+) -> anyhow::Result<ServiceRunner<Task<Processor, ES, RS>>>
 where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
@@ -246,8 +246,8 @@ mod rocksdb {
     pub type LogsStreamsService<Fn> = ServiceRunner<
         Task<
             SimplerProcessorAdapter<FnReceiptParser<Fn>>,
-            fuel_receipts_manager::rocksdb::Storage,
             fuel_events_manager::rocksdb::Storage,
+            fuel_receipts_manager::rocksdb::Storage,
         >,
     >;
 
