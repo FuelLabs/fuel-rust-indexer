@@ -39,7 +39,10 @@ use fuel_indexer_types::events::{
     UnstableReceipts,
 };
 use fuel_storage_utils::StorageIterator;
-use futures::StreamExt;
+use futures::{
+    StreamExt,
+    pin_mut,
+};
 use std::{
     collections::BTreeMap,
     iter,
@@ -155,10 +158,9 @@ where
 
     async fn into_task(
         mut self,
-        state: &fuel_core_services::StateWatcher,
+        _: &fuel_core_services::StateWatcher,
         _: Self::TaskParams,
     ) -> anyhow::Result<Self::Task> {
-        let mut state = state.clone();
         let UninitializedService {
             use_preconfirmations,
             storage,
@@ -176,14 +178,13 @@ where
 
         let heartbeat = event_fetcher.finalized_blocks_stream().await?;
 
-        let last_available_height = event_fetcher.last_height().await?;
         let liveness_duration = Duration::from_secs(5);
         let heartbeat_liveness = tokio::time::interval_at(
             Instant::now() + liveness_duration,
             liveness_duration,
         );
 
-        let mut task = Task {
+        let task = Task {
             storage,
             event_source,
             fetcher: event_fetcher,
@@ -196,17 +197,6 @@ where
             broadcast_blocks: shared_state.broadcast_blocks,
             heartbeat_liveness,
         };
-
-        tokio::select! {
-            _ = state.wait_stopping_or_stopped() => {
-                tracing::info!("{} got stop signal, shutting down.", Self::NAME);
-                return Err(anyhow::anyhow!("{} service during initial synchronization", Self::NAME));
-            }
-            result = task.sync_up_to(last_available_height) => {
-                result?;
-                tracing::info!("{} service synced up to height: {}", Self::NAME, last_available_height);
-            }
-        }
 
         Ok(task)
     }
@@ -236,7 +226,8 @@ where
 
         tracing::info!("Syncing up to from {start} to {end}");
 
-        let mut stream = self.fetcher.finalized_blocks_for_range(start..=end);
+        let stream = self.fetcher.finalized_blocks_for_range(start..=end);
+        pin_mut!(stream);
 
         while let Some(result) = stream.next().await {
             let block = result?;

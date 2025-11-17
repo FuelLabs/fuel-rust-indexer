@@ -1,8 +1,5 @@
 use crate::storage::Column;
-use fuel_core_services::stream::{
-    BoxStream,
-    RefBoxStream,
-};
+use fuel_core_services::stream::BoxStream;
 use fuel_core_storage::{
     iter::IterableStore,
     kv_store::KeyValueInspect,
@@ -20,6 +17,7 @@ use fuel_storage_utils::CommitLazyChanges;
 
 #[cfg(feature = "blocks-subscription")]
 use fuel_core_types::fuel_tx::Transaction;
+use futures_core::Stream;
 #[cfg(feature = "blocks-subscription")]
 use std::sync::Arc;
 
@@ -73,7 +71,7 @@ pub trait Fetcher: Send + Sync + 'static {
     fn finalized_blocks_for_range(
         &self,
         range: std::ops::RangeInclusive<u32>,
-    ) -> RefBoxStream<'static, anyhow::Result<FinalizedBlock>>;
+    ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> + Send + 'static;
 
     /// Returns the last available height of the events.
     fn last_height(&self) -> impl Future<Output = anyhow::Result<BlockHeight>> + Send;

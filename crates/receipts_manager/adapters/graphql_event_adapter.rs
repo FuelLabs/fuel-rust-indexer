@@ -25,7 +25,6 @@ use fuel_core_client::client::{
 use fuel_core_services::stream::{
     BoxStream,
     IntoBoxStream,
-    RefBoxStream,
 };
 use fuel_core_types::{
     blockchain::header::{
@@ -238,7 +237,7 @@ impl super::super::port::Fetcher for GraphqlFetcher {
     fn finalized_blocks_for_range(
         &self,
         range: RangeInclusive<u32>,
-    ) -> RefBoxStream<'static, anyhow::Result<FinalizedBlock>> {
+    ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> + Send + 'static {
         let blocks_stream = blocks_for_batched(
             self.client.clone(),
             *range.start()..range.end().saturating_add(1),
