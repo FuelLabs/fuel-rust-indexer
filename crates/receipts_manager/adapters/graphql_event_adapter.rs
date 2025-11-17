@@ -176,7 +176,16 @@ impl Fetcher for GraphqlFetcher {
                         }
                     }
                     Some(Err(err)) => {
-                        tracing::error!("Preconfirmation subscription error: {err:?}");
+                        if err.to_string().contains("--expensive-subscriptions") {
+                            tracing::warn!(
+                                "Preconfirmation subscriptions are disabled on the Fuel node."
+                            );
+                            futures::future::pending().await
+                        } else {
+                            tracing::error!(
+                                "Preconfirmation subscription error: {err:?}"
+                            );
+                        }
                         return;
                     }
                     None => {
