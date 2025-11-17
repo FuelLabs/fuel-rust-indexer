@@ -116,10 +116,8 @@ impl Fetcher for GraphqlFetcher {
         let (tx, rx) = broadcast::channel(self.event_capacity.into());
         let client_clone = self.client.clone();
 
-        tracing::info!("Subscribing to preconfirmation events");
-
         tokio::spawn(async move {
-            tracing::info!("Subscribed to preconfirmation events");
+            tracing::info!("Subscribing to preconfirmation events");
 
             let result = client_clone.preconfirmations_subscription().await;
             let mut subscription = match result {
@@ -208,31 +206,37 @@ impl Fetcher for GraphqlFetcher {
             tracing::info!("Subscribing to heartbeat events");
 
             let result = client_clone.new_blocks_subscription().await;
+
+            let pull_mode = {
+                let tx = tx.clone();
+                async move {
+                    tracing::warn!("Block subscriptions are disabled on the Fuel node.");
+                    let stream =
+                        fetcher.pull_block_stream(Duration::from_millis(200)).await;
+                    pin_mut!(stream);
+
+                    while let Some(result) = stream.next().await {
+                        match result {
+                            Ok(block) => {
+                                if tx.send(block).is_err() {
+                                    return;
+                                }
+                            }
+                            Err(err) => {
+                                tracing::error!(
+                                    "Error fetching block via polling: {err}"
+                                );
+                            }
+                        }
+                    }
+                }
+            };
+
             let mut subscription = match result {
                 Ok(subscription) => subscription,
                 Err(err) => {
                     if err.to_string().contains("--expensive-subscriptions") {
-                        tracing::warn!(
-                            "Block subscriptions are disabled on the Fuel node."
-                        );
-                        let stream =
-                            fetcher.pull_block_stream(Duration::from_millis(200)).await;
-                        pin_mut!(stream);
-
-                        while let Some(result) = stream.next().await {
-                            match result {
-                                Ok(block) => {
-                                    if tx.send(block).is_err() {
-                                        return;
-                                    }
-                                }
-                                Err(err) => {
-                                    tracing::error!(
-                                        "Error fetching block via polling: {err}"
-                                    );
-                                }
-                            }
-                        }
+                        pull_mode.await
                     } else {
                         tracing::error!(
                             "Failed to subscribe to preconfirmation events: {err:?}"
@@ -269,7 +273,11 @@ impl Fetcher for GraphqlFetcher {
                         }
                     }
                     Some(Err(err)) => {
-                        tracing::error!("Heartbeat subscription error: {err:?}");
+                        if err.to_string().contains("--expensive-subscriptions") {
+                            pull_mode.await
+                        } else {
+                            tracing::error!("Heartbeat subscription error: {err:?}");
+                        }
                         return;
                     }
                     None => {
