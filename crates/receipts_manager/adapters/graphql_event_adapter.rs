@@ -6,7 +6,10 @@ use crate::{
         },
         concurrent_stream::ConcurrentStream,
     },
-    port::FinalizedBlock,
+    port::{
+        Fetcher,
+        FinalizedBlock,
+    },
 };
 use fuel_core_client::client::{
     FuelClient,
@@ -27,13 +30,20 @@ use fuel_core_services::stream::{
     IntoBoxStream,
 };
 use fuel_core_types::{
-    blockchain::header::{
-        ApplicationHeader,
-        BlockHeader,
-        BlockHeaderV1,
-        ConsensusHeader,
-        GeneratedConsensusFields,
-        v1::GeneratedApplicationFieldsV1,
+    blockchain::{
+        consensus::{
+            Consensus,
+            Genesis,
+            poa::PoAConsensus,
+        },
+        header::{
+            ApplicationHeader,
+            BlockHeader,
+            BlockHeaderV1,
+            ConsensusHeader,
+            GeneratedConsensusFields,
+            v1::GeneratedApplicationFieldsV1,
+        },
     },
     fuel_tx::TxPointer,
     fuel_types::BlockHeight,
@@ -46,8 +56,10 @@ use fuel_indexer_types::events::SuccessfulTransactionReceipts;
 use fuels::tx::Receipt;
 use futures::{
     Stream,
-    StreamExt,
+    pin_mut,
+    stream::StreamExt,
 };
+use futures_util::TryStreamExt;
 use iter_tools::Itertools;
 use std::{
     iter,
@@ -57,15 +69,17 @@ use std::{
         RangeInclusive,
     },
     sync::Arc,
+    time::Duration,
 };
-use tokio::sync::broadcast;
+use tokio::{
+    sync::broadcast,
+    time::{
+        Instant,
+        interval_at,
+    },
+};
 use tokio_stream::wrappers::BroadcastStream;
 
-use fuel_core_types::blockchain::consensus::{
-    Consensus,
-    Genesis,
-    poa::PoAConsensus,
-};
 #[cfg(feature = "blocks-subscription")]
 use fuel_core_types::{
     fuel_tx::Transaction,
@@ -78,6 +92,7 @@ pub mod tests;
 #[cfg(test)]
 pub mod fuel_core_mock;
 
+#[derive(Clone)]
 pub struct GraphqlFetcher {
     client: Arc<FuelClient>,
     event_capacity: NonZeroUsize,
@@ -94,7 +109,7 @@ pub struct GraphqlEventAdapterConfig {
     pub blocks_request_concurrency: usize,
 }
 
-impl super::super::port::Fetcher for GraphqlFetcher {
+impl Fetcher for GraphqlFetcher {
     async fn predicted_receipts_stream(
         &self,
     ) -> anyhow::Result<BoxStream<SuccessfulTransactionReceipts>> {
@@ -104,12 +119,25 @@ impl super::super::port::Fetcher for GraphqlFetcher {
         tracing::info!("Subscribing to preconfirmation events");
 
         tokio::spawn(async move {
-            let Ok(mut subscription) = client_clone.preconfirmations_subscription().await
-            else {
-                return
-            };
-
             tracing::info!("Subscribed to preconfirmation events");
+
+            let result = client_clone.preconfirmations_subscription().await;
+            let mut subscription = match result {
+                Ok(subscription) => subscription,
+                Err(err) => {
+                    if err.to_string().contains("--expensive-subscriptions") {
+                        tracing::warn!(
+                            "Preconfirmation subscriptions are disabled on the Fuel node."
+                        );
+                        futures::future::pending().await
+                    } else {
+                        tracing::error!(
+                            "Failed to subscribe to preconfirmation events: {err:?}"
+                        );
+                    }
+                    return
+                }
+            };
 
             loop {
                 match subscription.next().await {
@@ -174,16 +202,45 @@ impl super::super::port::Fetcher for GraphqlFetcher {
     async fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>> {
         let (tx, rx) = broadcast::channel(self.heartbeat_capacity.into());
         let client_clone = self.client.clone();
+        let fetcher = self.clone();
 
         tokio::spawn(async move {
             tracing::info!("Subscribing to heartbeat events");
 
-            let Ok(mut subscription) = client_clone.new_blocks_subscription().await
-            else {
-                return;
-            };
+            let result = client_clone.new_blocks_subscription().await;
+            let mut subscription = match result {
+                Ok(subscription) => subscription,
+                Err(err) => {
+                    if err.to_string().contains("--expensive-subscriptions") {
+                        tracing::warn!(
+                            "Block subscriptions are disabled on the Fuel node."
+                        );
+                        let stream =
+                            fetcher.pull_block_stream(Duration::from_millis(200)).await;
+                        pin_mut!(stream);
 
-            tracing::info!("Subscribed to heartbeat events");
+                        while let Some(result) = stream.next().await {
+                            match result {
+                                Ok(block) => {
+                                    if tx.send(block).is_err() {
+                                        return;
+                                    }
+                                }
+                                Err(err) => {
+                                    tracing::error!(
+                                        "Error fetching block via polling: {err}"
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        tracing::error!(
+                            "Failed to subscribe to preconfirmation events: {err:?}"
+                        );
+                    }
+                    return
+                }
+            };
 
             loop {
                 match subscription.next().await {
@@ -497,4 +554,52 @@ pub async fn blocks_for(
     };
     let response = client.full_blocks(request).await?;
     Ok(response.results)
+}
+
+impl GraphqlFetcher {
+    async fn pull_block_stream(
+        &self,
+        interval_duration: Duration,
+    ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> {
+        let last_known_height = match self.last_height().await {
+            Ok(height) => *height,
+            Err(err) => {
+                return futures::stream::once(async { Err(err) }).left_stream();
+            }
+        };
+        let last_known_height = Arc::new(tokio::sync::Mutex::new(last_known_height));
+
+        // Create an interval stream that ticks every X seconds
+        let interval = interval_at(Instant::now() + interval_duration, interval_duration);
+
+        // Convert the Interval stream into a stream of results
+        tokio_stream::wrappers::IntervalStream::new(interval)
+            .filter_map(move |_| {
+                // We must spawn a new task to run the async logic for each tick.
+                // The spawned task runs the fetch_data future.
+                let last_known_height = last_known_height.clone();
+                async move {
+                    let current_known_height = match self.last_height().await {
+                        Ok(height) => *height,
+                        Err(err) => {
+                            return Some(Err(err));
+                        }
+                    };
+
+                    let mut last_known_height = last_known_height.lock().await;
+
+                    if current_known_height > *last_known_height {
+                        let stream = self.finalized_blocks_for_range(
+                            (*last_known_height + 1)..=current_known_height,
+                        );
+                        *last_known_height = current_known_height;
+                        Some(Ok(stream))
+                    } else {
+                        None
+                    }
+                }
+            })
+            .try_flatten()
+            .right_stream()
+    }
 }
