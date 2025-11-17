@@ -170,13 +170,13 @@ where
         } = self;
 
         let event_source = if use_preconfirmations {
-            event_fetcher.predicted_receipts_stream().await?
+            event_fetcher.predicted_receipts_stream()?
         } else {
             tracing::info!("Pre-confirmations are disabled, using empty event source.");
             futures::stream::pending().into_boxed()
         };
 
-        let heartbeat = event_fetcher.finalized_blocks_stream().await?;
+        let heartbeat = event_fetcher.finalized_blocks_stream()?;
 
         let liveness_duration = Duration::from_secs(5);
         let heartbeat_liveness = tokio::time::interval_at(
@@ -484,7 +484,7 @@ where
             event = self.event_source.next() => {
                 match event {
                     None => {
-                        match self.fetcher.predicted_receipts_stream().await {
+                        match self.fetcher.predicted_receipts_stream() {
                             Ok(stream) => {
                                 self.event_source = stream;
                                 fuel_core_services::TaskNextAction::Continue
@@ -509,7 +509,7 @@ where
             _ = self.heartbeat_liveness.tick() => {
                 tracing::error!("Heartbeat liveness timeout reached, \
                     attempting to reconnect to confirmed events stream.");
-                match self.fetcher.finalized_blocks_stream().await {
+                match self.fetcher.finalized_blocks_stream() {
                     Ok(stream) => {
                         self.heartbeat = stream;
                         self.heartbeat_liveness.reset();
@@ -526,7 +526,7 @@ where
                 self.heartbeat_liveness.reset();
                 match hearbeat {
                     None => {
-                        match self.fetcher.finalized_blocks_stream().await {
+                        match self.fetcher.finalized_blocks_stream() {
                             Ok(stream) => {
                                 self.heartbeat = stream;
                                 self.heartbeat_liveness.reset();
@@ -589,7 +589,7 @@ where
         }
     }
 
-    pub async fn unstable_receipts_starting_from(
+    pub fn unstable_receipts_starting_from(
         &self,
         start_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
@@ -686,8 +686,7 @@ where
             });
 
         let storage_iter_until_available_height =
-            futures::stream::iter(storage_iter_until_available_height.into_iter())
-                .try_flatten();
+            futures::stream::iter(storage_iter_until_available_height).try_flatten();
 
         Ok(storage_iter_until_available_height
             .chain(next_available_height_events)

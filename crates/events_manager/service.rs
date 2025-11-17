@@ -197,7 +197,7 @@ where
             stable_broadcast: shared_state.stable_broadcast,
         };
 
-        task.reconnect_service_events_stream().await?;
+        task.reconnect_service_events_stream()?;
 
         Ok(task)
     }
@@ -218,7 +218,7 @@ where
         }
     }
 
-    async fn reconnect_service_events_stream(&mut self) -> anyhow::Result<()> {
+    fn reconnect_service_events_stream(&mut self) -> anyhow::Result<()> {
         tracing::info!("Reconnecting to receipts provider event stream");
 
         let starting_height =
@@ -226,7 +226,7 @@ where
                 anyhow::anyhow!("Reached the maximum height for event indexer")
             })?;
 
-        let event_source = self.streams.events_starting_from(starting_height).await?;
+        let event_source = self.streams.events_starting_from(starting_height)?;
 
         self.event_source = event_source;
         self.broadcast_unstable_event(UnstableEvent::Rollback(starting_height));
@@ -241,7 +241,7 @@ where
     ) -> anyhow::Result<()> {
         match event {
             None => {
-                self.reconnect_service_events_stream().await?;
+                self.reconnect_service_events_stream()?;
             }
             Some(event) => {
                 let event = event?;
@@ -281,7 +281,7 @@ where
                         if checkpoint.events_count != self.events.len()
                             || next_block_height != checkpoint.block_height
                         {
-                            return self.reconnect_service_events_stream().await;
+                            return self.reconnect_service_events_stream();
                         }
 
                         let total_events_count =
@@ -306,15 +306,19 @@ where
 
                         self.checkpoint_height.send_replace(next_block_height);
 
-                        for events in self.events.drain(..) {
-                            let result = self.stable_broadcast.send(events);
+                        if self.stable_broadcast.receiver_count() > 0 {
+                            for events in self.events.drain(..) {
+                                let result = self.stable_broadcast.send(events);
 
-                            if let Err(err) = result {
-                                tracing::warn!(
-                                    "Failed to broadcast stable event: {}",
-                                    err
-                                );
+                                if let Err(err) = result {
+                                    tracing::warn!(
+                                        "Failed to broadcast stable event: {}",
+                                        err
+                                    );
+                                }
                             }
+                        } else {
+                            self.events.clear();
                         }
 
                         tracing::info!(

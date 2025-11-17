@@ -110,7 +110,7 @@ pub struct GraphqlEventAdapterConfig {
 }
 
 impl Fetcher for GraphqlFetcher {
-    async fn predicted_receipts_stream(
+    fn predicted_receipts_stream(
         &self,
     ) -> anyhow::Result<BoxStream<SuccessfulTransactionReceipts>> {
         let (tx, rx) = broadcast::channel(self.event_capacity.into());
@@ -199,7 +199,7 @@ impl Fetcher for GraphqlFetcher {
         Ok(stream.into_boxed())
     }
 
-    async fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>> {
+    fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>> {
         let (tx, rx) = broadcast::channel(self.heartbeat_capacity.into());
         let client_clone = self.client.clone();
         let fetcher = self.clone();

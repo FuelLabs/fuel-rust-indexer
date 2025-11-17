@@ -57,12 +57,10 @@ pub trait Fetcher: Send + Sync + 'static {
     /// Doesn't guarantee that receipts are final.
     fn predicted_receipts_stream(
         &self,
-    ) -> impl Future<Output = anyhow::Result<BoxStream<SuccessfulTransactionReceipts>>> + Send;
+    ) -> anyhow::Result<BoxStream<SuccessfulTransactionReceipts>>;
 
     /// Returns a realtime stream of finalized blocks.
-    fn finalized_blocks_stream(
-        &self,
-    ) -> impl Future<Output = anyhow::Result<BoxStream<FinalizedBlock>>> + Send;
+    fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>>;
 
     /// Returns stream of finalized blocks for provided range.
     ///

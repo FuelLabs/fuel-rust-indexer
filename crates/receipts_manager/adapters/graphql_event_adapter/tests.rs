@@ -56,7 +56,6 @@ async fn event_source_next__waits_until_next_event_available_with_valid_subscrip
     // when
     let mut event_source = fetcher
         .predicted_receipts_stream()
-        .await
         .expect("Failed to subscribe to event source");
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -86,7 +85,6 @@ async fn heartbeat_next__waits_until_next_heartbeat_available_with_valid_subscri
     // when
     let mut heartbeat = fetcher
         .finalized_blocks_stream()
-        .await
         .expect("Failed to subscribe to heartbeat");
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -116,7 +114,6 @@ async fn heartbeat_next__returns_next_block_height_with_valid_subscription() {
     // when
     let mut heartbeat = fetcher
         .finalized_blocks_stream()
-        .await
         .expect("Failed to subscribe to heartbeat");
 
     // produce a block to trigger a heartbeat
@@ -150,7 +147,6 @@ async fn event_source_next__returns_next_event_with_valid_subscription() {
     // when
     let mut event_source = fetcher
         .predicted_receipts_stream()
-        .await
         .expect("Failed to subscribe to event source");
 
     // produce a transaction to trigger an event
@@ -182,7 +178,6 @@ async fn event_source_next__returns_returns_only_four_events_per_transfer() {
     // Given
     let mut event_source = fetcher
         .predicted_receipts_stream()
-        .await
         .expect("Failed to subscribe to event source");
 
     // When
@@ -223,7 +218,6 @@ async fn event_source_next__returns_channel_lagged_error_when_receiver_falls_beh
     // when
     let mut event_source = fetcher
         .predicted_receipts_stream()
-        .await
         .expect("Failed to subscribe to event source");
 
     // produce multiple transactions rapidly to overwhelm the small channel

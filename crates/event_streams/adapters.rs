@@ -27,13 +27,11 @@ impl<S> fuel_events_manager::port::StreamsSource for StreamsAdapter<S>
 where
     S: fuel_receipts_manager::port::Storage,
 {
-    async fn events_starting_from(
+    fn events_starting_from(
         &mut self,
         start_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
-        self.receipts
-            .unstable_receipts_starting_from(start_height)
-            .await
+        self.receipts.unstable_receipts_starting_from(start_height)
     }
 }
 

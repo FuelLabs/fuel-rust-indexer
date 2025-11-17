@@ -80,7 +80,6 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     // Given
     let stream = shared_state
         .unstable_receipts_starting_from(starting_height)
-        .await
         .unwrap();
 
     // When
@@ -137,7 +136,6 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
     // When
     let stream = shared_state
         .unstable_receipts_starting_from(starting_height)
-        .await
         .unwrap();
 
     // Then
@@ -194,7 +192,6 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
     // When
     let stream = shared_state
         .unstable_receipts_starting_from(starting_height)
-        .await
         .unwrap();
     let _ = fuel_core.produce_block().await;
     let _ = task.run(&mut StateWatcher::started()).await;
@@ -251,7 +248,6 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     // Given
     let stream = shared_state
         .unstable_receipts_starting_from(2u32.into())
-        .await
         .unwrap();
 
     // When

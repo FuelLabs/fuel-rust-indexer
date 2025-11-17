@@ -42,7 +42,7 @@ pub trait StreamsSource: Send + Sync + 'static {
     fn events_starting_from(
         &mut self,
         start_height: BlockHeight,
-    ) -> impl Future<Output = anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>>> + Send;
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>>;
 }
 
 pub trait ReceiptsProcessor: Send + Sync + 'static {
