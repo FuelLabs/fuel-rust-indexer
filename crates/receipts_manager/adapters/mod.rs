@@ -9,8 +9,10 @@ use url::Url;
 
 pub mod client_ext;
 pub mod concurrent_stream;
+pub mod concurrent_unordered_stream;
 pub mod graphql_event_adapter;
 pub mod resizable_buffered;
+pub mod resizable_buffered_unordered;
 
 pub fn new_service<S, F>(
     starting_block_height: BlockHeight,

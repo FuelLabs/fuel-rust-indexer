@@ -16,26 +16,26 @@ use futures_util::{
     StreamExt,
     stream::{
         Fuse,
-        FuturesOrdered,
+        FuturesUnordered,
     },
 };
 use pin_project_lite::pin_project;
 
 pin_project! {
     #[must_use = "streams do nothing unless polled"]
-    pub struct ResizableBuffered<St>
+    pub struct ResizableBufferedUnordered<St>
     where
         St: Stream,
         St::Item: Future,
     {
         #[pin]
         stream: Fuse<St>,
-        in_progress_queue: FuturesOrdered<St::Item>,
+        in_progress_queue: FuturesUnordered<St::Item>,
         max: usize,
     }
 }
 
-impl<St> fmt::Debug for ResizableBuffered<St>
+impl<St> fmt::Debug for ResizableBufferedUnordered<St>
 where
     St: Stream + fmt::Debug,
     St::Item: Future,
@@ -49,7 +49,7 @@ where
     }
 }
 
-impl<St> ResizableBuffered<St>
+impl<St> ResizableBufferedUnordered<St>
 where
     St: Stream,
     St::Item: Future,
@@ -57,7 +57,7 @@ where
     pub fn new(stream: St, n: usize) -> Self {
         Self {
             stream: stream.fuse(),
-            in_progress_queue: FuturesOrdered::new(),
+            in_progress_queue: FuturesUnordered::new(),
             max: n,
         }
     }
@@ -80,7 +80,7 @@ where
     }
 }
 
-impl<St> Stream for ResizableBuffered<St>
+impl<St> Stream for ResizableBufferedUnordered<St>
 where
     St: Stream,
     St::Item: Future,
@@ -94,7 +94,7 @@ where
         // our queue of futures.
         while this.in_progress_queue.len() < *this.max {
             match this.stream.as_mut().poll_next(cx) {
-                Poll::Ready(Some(fut)) => this.in_progress_queue.push_back(fut),
+                Poll::Ready(Some(fut)) => this.in_progress_queue.push(fut),
                 Poll::Ready(None) | Poll::Pending => break,
             }
         }
@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<St> FusedStream for ResizableBuffered<St>
+impl<St> FusedStream for ResizableBufferedUnordered<St>
 where
     St: Stream,
     St::Item: Future,

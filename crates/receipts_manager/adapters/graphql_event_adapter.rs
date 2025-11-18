@@ -4,7 +4,7 @@ use crate::{
             ClientExt,
             FullBlock,
         },
-        concurrent_stream::ConcurrentStream,
+        concurrent_unordered_stream::ConcurrentUnorderedStream,
     },
     port::{
         Fetcher,
@@ -62,6 +62,7 @@ use futures::{
 use futures_util::TryStreamExt;
 use iter_tools::Itertools;
 use std::{
+    collections::BTreeMap,
     iter,
     num::NonZeroUsize,
     ops::{
@@ -72,7 +73,10 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::broadcast,
+    sync::{
+        broadcast,
+        mpsc,
+    },
     time::{
         Instant,
         interval_at,
@@ -312,14 +316,14 @@ impl Fetcher for GraphqlFetcher {
         &self,
         range: RangeInclusive<u32>,
     ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> + Send + 'static {
-        let blocks_stream = blocks_for_batched(
+        let blocks_unordered_stream = blocks_for_batched(
             self.client.clone(),
             *range.start()..range.end().saturating_add(1),
             self.blocks_request_batch_size,
             self.blocks_request_concurrency,
         );
 
-        let stream = blocks_stream.filter_map(|block| async move {
+        let unordered_stream = blocks_unordered_stream.filter_map(|block| async move {
             let mut header = match block.header.version {
                 HeaderVersion::V1 => {
                     let mut default = BlockHeaderV1::default();
@@ -487,7 +491,42 @@ impl Fetcher for GraphqlFetcher {
             Some(Ok(block))
         });
 
-        stream.into_boxed_ref()
+        let (sender, receiver) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            let unordered_stream = unordered_stream;
+            pin_mut!(unordered_stream);
+            let mut remaining_range = range;
+
+            let mut ready_blocks: BTreeMap<BlockHeight, FinalizedBlock> = BTreeMap::new();
+
+            while let Some(result) = unordered_stream.next().await {
+                match result {
+                    Ok(block) => {
+                        ready_blocks.insert(*block.header.height(), block);
+                    }
+                    Err(err) => {
+                        let _ = sender.send(Err(err));
+                        break;
+                    }
+                }
+
+                while let Some(entry) = ready_blocks.first_entry() {
+                    if **entry.key() == *remaining_range.start() {
+                        let block = entry.remove();
+                        if sender.send(Ok(block)).is_err() {
+                            return;
+                        }
+                        remaining_range = (remaining_range.start().saturating_add(1))
+                            ..=*remaining_range.end();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        });
+
+        tokio_stream::wrappers::UnboundedReceiverStream::new(receiver)
     }
 
     async fn last_height(&self) -> anyhow::Result<BlockHeight> {
@@ -548,7 +587,7 @@ pub fn blocks_for_batched(
                 }
             }
         })
-        .concurrent(concurrency);
+        .concurrent_unordered(concurrency);
 
     stream.flatten()
 }
