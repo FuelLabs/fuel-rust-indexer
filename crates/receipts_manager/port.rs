@@ -12,7 +12,7 @@ use fuel_core_types::{
     fuel_types::BlockHeight,
     services::executor::TransactionExecutionStatus,
 };
-use fuel_indexer_types::events::SuccessfulTransactionReceipts;
+use fuel_indexer_types::events::TransactionReceipts;
 use fuel_storage_utils::CommitLazyChanges;
 
 #[cfg(feature = "blocks-subscription")]
@@ -55,9 +55,8 @@ pub struct FinalizedBlock {
 pub trait Fetcher: Send + Sync + 'static {
     /// Returns a realtime stream of predicted receipts.
     /// Doesn't guarantee that receipts are final.
-    fn predicted_receipts_stream(
-        &self,
-    ) -> anyhow::Result<BoxStream<SuccessfulTransactionReceipts>>;
+    fn predicted_receipts_stream(&self)
+    -> anyhow::Result<BoxStream<TransactionReceipts>>;
 
     /// Returns a realtime stream of finalized blocks.
     fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>>;

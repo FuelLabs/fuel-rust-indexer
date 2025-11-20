@@ -52,7 +52,10 @@ use fuel_core_types::{
         TransactionExecutionStatus,
     },
 };
-use fuel_indexer_types::events::SuccessfulTransactionReceipts;
+use fuel_indexer_types::events::{
+    ExecutionStatus,
+    TransactionReceipts,
+};
 use fuels::tx::Receipt;
 use futures::{
     Stream,
@@ -116,7 +119,7 @@ pub struct GraphqlEventAdapterConfig {
 impl Fetcher for GraphqlFetcher {
     fn predicted_receipts_stream(
         &self,
-    ) -> anyhow::Result<BoxStream<SuccessfulTransactionReceipts>> {
+    ) -> anyhow::Result<BoxStream<TransactionReceipts>> {
         let (tx, rx) = broadcast::channel(self.event_capacity.into());
         let client_clone = self.client.clone();
 
@@ -146,14 +149,24 @@ impl Fetcher for GraphqlFetcher {
                     Some(Ok(preconf_result)) => {
                         match preconf_result {
                             fuel_core_client::client::types::TransactionStatus::PreconfirmationFailure {
-                                transaction_id, reason, ..
+                                transaction_id, tx_pointer, reason, receipts, ..
                             } => {
-                                tracing::warn!(
-                                    tx_id = %transaction_id,
-                                    "Preconfirmation failure for transaction: {}",
-                                    reason
-                                );
-                                continue;
+                                let Some(receipts) = receipts.filter(|r| !r.is_empty()) else {
+                                    continue;
+                                };
+
+                                // `fuel-core` has a bug where pre confirmations use incorrect tx pointer
+                                let corrected_tx_pointer = TxPointer::new(tx_pointer.block_height(), tx_pointer.tx_index().saturating_sub(1));
+                                let event = TransactionReceipts {
+                                    tx_pointer: corrected_tx_pointer,
+                                    tx_id: transaction_id,
+                                    receipts: Arc::new(receipts),
+                                    execution_status: ExecutionStatus::Failure { reason }
+                                };
+
+                                if tx.send(event).is_err() {
+                                    return;
+                                }
                             }
                             fuel_core_client::client::types::TransactionStatus::PreconfirmationSuccess {
                                 tx_pointer, receipts, transaction_id, ..
@@ -164,10 +177,11 @@ impl Fetcher for GraphqlFetcher {
 
                                 // `fuel-core` has a bug where pre confirmations use incorrect tx pointer
                                 let corrected_tx_pointer = TxPointer::new(tx_pointer.block_height(), tx_pointer.tx_index().saturating_sub(1));
-                                let event = SuccessfulTransactionReceipts {
+                                let event = TransactionReceipts {
                                     tx_pointer: corrected_tx_pointer,
                                     tx_id: transaction_id,
                                     receipts: Arc::new(receipts),
+                                    execution_status: ExecutionStatus::Success,
                                 };
 
                                 if tx.send(event).is_err() {

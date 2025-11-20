@@ -35,6 +35,8 @@ use fuel_core_types::{
 };
 use fuel_indexer_types::events::{
     CheckpointEvent,
+    ExecutionStatus,
+    SuccessfulTransactionReceipts,
     UnstableReceipts,
 };
 use fuel_storage_utils::StorageIterator;
@@ -253,15 +255,31 @@ where
                         )
                     })?;
 
+                assert_eq!(next_block_height, event.block_height());
+
                 match event {
                     UnstableReceipts::Receipts(receipts) => {
+                        let is_successful =
+                            matches!(receipts.execution_status, ExecutionStatus::Success);
+                        let successful_receipts = if is_successful {
+                            SuccessfulTransactionReceipts {
+                                tx_pointer: receipts.tx_pointer,
+                                tx_id: receipts.tx_id,
+                                receipts: receipts.receipts,
+                            }
+                        } else {
+                            // Skip failed transactions
+                            tracing::debug!(
+                                "Skipping failed transaction receipts for tx_id: {} with status: {:?}",
+                                receipts.tx_id,
+                                receipts.execution_status
+                            );
+                            return Ok(());
+                        };
+
                         let events: Vec<_> = self
                             .processor
-                            .process_transaction_receipts(
-                                receipts.tx_pointer,
-                                receipts.tx_id,
-                                receipts.receipts.iter(),
-                            )
+                            .process_transaction_receipts(&successful_receipts)
                             .collect();
 
                         let tx = TransactionEvents {

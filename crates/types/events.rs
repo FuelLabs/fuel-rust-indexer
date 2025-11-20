@@ -16,6 +16,23 @@ use fuel_core_types::{
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ExecutionStatus {
+    Success,
+    Failure { reason: String },
+}
+
+/// Represents receipts for executed transaction.
+/// Transactions can be successfully or unsuccessfully executed.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TransactionReceipts {
+    pub tx_pointer: TxPointer,
+    pub tx_id: TxId,
+    pub receipts: Arc<Vec<Receipt>>,
+    pub execution_status: ExecutionStatus,
+}
+
+/// Represents receipts for successfully executed transaction.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SuccessfulTransactionReceipts {
     pub tx_pointer: TxPointer,
     pub tx_id: TxId,
@@ -32,7 +49,7 @@ pub struct CheckpointEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UnstableReceipts {
-    Receipts(SuccessfulTransactionReceipts),
+    Receipts(TransactionReceipts),
     Checkpoint(CheckpointEvent),
     Rollback(BlockHeight),
 }
@@ -47,8 +64,8 @@ impl UnstableReceipts {
     }
 }
 
-impl From<SuccessfulTransactionReceipts> for UnstableReceipts {
-    fn from(event: SuccessfulTransactionReceipts) -> Self {
+impl From<TransactionReceipts> for UnstableReceipts {
+    fn from(event: TransactionReceipts) -> Self {
         UnstableReceipts::Receipts(event)
     }
 }

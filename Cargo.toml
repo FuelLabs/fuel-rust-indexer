@@ -34,7 +34,7 @@ fuel-events-manager = { path = "crates/events_manager" }
 fuel-indexer-types = { path = "crates/types" }
 fuel-receipts-manager = { path = "crates/receipts_manager" }
 fuel-storage-utils = { path = "crates/storage_utils" }
-fuels = { version = "0.76.0", default-features = false, features = ["std"] }
+fuels = { version = "0.76.0" }
 futures = "0.3"
 serde = { version = "1" }
 strum = { version = "0.25" }

@@ -3,15 +3,11 @@ use crate::processors::{
     simple_processor::ReceiptProcessor,
 };
 use fuel_core_services::stream::BoxStream;
-use fuel_core_types::{
-    fuel_tx::{
-        Receipt,
-        TxId,
-        TxPointer,
-    },
-    fuel_types::BlockHeight,
+use fuel_core_types::fuel_types::BlockHeight;
+use fuel_indexer_types::events::{
+    SuccessfulTransactionReceipts,
+    UnstableReceipts,
 };
-use fuel_indexer_types::events::UnstableReceipts;
 
 pub struct StreamsAdapter<S> {
     receipts: fuel_receipts_manager::service::SharedState<S>,
@@ -56,10 +52,12 @@ where
 
     fn process_transaction_receipts<'a>(
         &'a self,
-        tx_pointer: TxPointer,
-        tx_id: TxId,
-        receipts: impl Iterator<Item = &'a Receipt> + 'a,
+        receipts: &'a SuccessfulTransactionReceipts,
     ) -> impl Iterator<Item = Self::Event> + 'a {
-        self.processor.process_iter(tx_pointer, tx_id, receipts)
+        self.processor.process_iter(
+            receipts.tx_pointer,
+            receipts.tx_id,
+            receipts.receipts.iter(),
+        )
     }
 }

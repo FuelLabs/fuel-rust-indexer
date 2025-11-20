@@ -35,7 +35,8 @@ use fuel_core_types::{
 };
 use fuel_indexer_types::events::{
     CheckpointEvent,
-    SuccessfulTransactionReceipts,
+    ExecutionStatus,
+    TransactionReceipts,
     UnstableReceipts,
 };
 use fuel_storage_utils::StorageIterator;
@@ -126,12 +127,12 @@ where
 
 pub struct Task<S, F> {
     storage: S,
-    event_source: BoxStream<SuccessfulTransactionReceipts>,
+    event_source: BoxStream<TransactionReceipts>,
     fetcher: F,
     heartbeat: BoxStream<FinalizedBlock>,
     heartbeat_liveness: tokio::time::Interval,
-    emitted_events: Vec<SuccessfulTransactionReceipts>,
-    pending_events: BTreeMap<BlockHeight, BTreeMap<u16, SuccessfulTransactionReceipts>>,
+    emitted_events: Vec<TransactionReceipts>,
+    pending_events: BTreeMap<BlockHeight, BTreeMap<u16, TransactionReceipts>>,
     checkpoint_height: watch::Sender<BlockHeight>,
     broadcast_receipts: broadcast::Sender<UnstableReceipts>,
     #[cfg(feature = "blocks-subscription")]
@@ -232,7 +233,7 @@ where
         while let Some(result) = stream.next().await {
             let block = result?;
             tracing::info!("Handle block height {}", block.header.height());
-            self.handle_heartbeat(block).await?;
+            self.handle_heartbeat(block, false).await?;
         }
 
         let checkpoint_height_after_sync = *self.checkpoint_height.borrow();
@@ -247,11 +248,13 @@ where
         Ok(())
     }
 
-    async fn handle_heartbeat(&mut self, block: FinalizedBlock) -> anyhow::Result<()> {
+    async fn handle_heartbeat(
+        &mut self,
+        block: FinalizedBlock,
+        broadcast_pending_events: bool,
+    ) -> anyhow::Result<()> {
         let block_height = *block.header.height();
         let checkpoint_height = *self.checkpoint_height.borrow();
-        let emitted_events = core::mem::take(&mut self.emitted_events);
-        self.pending_events.remove(&block_height);
 
         // If the block height is less than or equal to the checkpoint height,
         // we should not process it, as it is a duplicate.
@@ -283,34 +286,42 @@ where
             future.await?;
         }
 
+        let emitted_events = core::mem::take(&mut self.emitted_events);
+        self.pending_events.remove(&block_height);
+
         let mut tx = self.storage.write_transaction();
 
         let statuses = block.statuses;
-        let mut success_receipts = statuses
+        let mut receipts = statuses
             .iter()
             .enumerate()
-            .filter_map(|(tx_index, status)| {
-                let receipts = match &status.result {
+            .map(|(tx_index, status)| {
+                let (receipts, execution_status) = match &status.result {
                     TransactionExecutionResult::Success { receipts, .. } => {
-                        receipts.clone()
+                        (receipts.clone(), ExecutionStatus::Success)
                     }
-                    TransactionExecutionResult::Failed { .. } => return None,
+                    TransactionExecutionResult::Failed {
+                        receipts, result, ..
+                    } => {
+                        let reason = TransactionExecutionResult::reason(receipts, result);
+                        (receipts.clone(), ExecutionStatus::Failure { reason })
+                    }
                 };
 
-                let tx_with_receipts = SuccessfulTransactionReceipts {
+                TransactionReceipts {
                     tx_pointer: TxPointer::new(block_height, tx_index as u16),
                     tx_id: status.id,
                     receipts,
-                };
-                Some(tx_with_receipts)
+                    execution_status,
+                }
             })
             .collect::<Vec<_>>();
 
         // Remove receipts from `Mint` transactions, as they are not relevant for the indexer.
-        success_receipts.pop();
+        receipts.pop();
 
         tx.storage_as_mut::<Receipts>()
-            .insert(&block_height, &success_receipts)?;
+            .insert(&block_height, &receipts)?;
 
         #[cfg(feature = "blocks-subscription")]
         let block_event = BlockEvent {
@@ -334,15 +345,15 @@ where
 
         self.checkpoint_height.send_replace(block_height);
 
-        let events_count = success_receipts.len();
+        let events_count = receipts.len();
 
-        if success_receipts != emitted_events {
+        if receipts != emitted_events {
             // It is possible that we received a heartbeat before we got all pre confirmations.
             // In this case, we can just emit the rest of events.
-            if success_receipts.len() > emitted_events.len()
-                && success_receipts[..emitted_events.len()] == emitted_events[..]
+            if receipts.len() > emitted_events.len()
+                && receipts[..emitted_events.len()] == emitted_events[..]
             {
-                for event in success_receipts.into_iter().skip(emitted_events.len()) {
+                for event in receipts.into_iter().skip(emitted_events.len()) {
                     Self::broadcast_event(&self.broadcast_receipts, event.into())?;
                 }
             } else {
@@ -353,7 +364,7 @@ where
                             Emitted events: {:?}, Received events count: {:?}",
                         block_height,
                         emitted_events,
-                        success_receipts
+                        receipts
                     );
 
                     Self::broadcast_event(
@@ -362,7 +373,7 @@ where
                     )?;
                 }
 
-                for event in success_receipts {
+                for event in receipts {
                     Self::broadcast_event(&self.broadcast_receipts, event.into())?;
                 }
             }
@@ -378,23 +389,24 @@ where
         #[cfg(feature = "blocks-subscription")]
         let _ = self.broadcast_blocks.send(block_event);
 
-        let next_checkpoint_height =
-            self.checkpoint_height.borrow().succ().ok_or_else(|| {
+        if broadcast_pending_events {
+            let next_block_height = block_height.succ().ok_or_else(|| {
                 anyhow::anyhow!(
                     "Failed to increment checkpoint height from {}",
                     block_height
                 )
             })?;
 
-        // If we have any next events that are pending for the next checkpoint height,
-        // emit them now.
-        let next_pending_events = self
-            .pending_events
-            .remove(&next_checkpoint_height)
-            .unwrap_or_default();
+            // If we have any next events that are pending for the next checkpoint height,
+            // emit them now.
+            let next_pending_events = self
+                .pending_events
+                .remove(&next_block_height)
+                .unwrap_or_default();
 
-        for (_, next_event) in next_pending_events {
-            self.handle_next_event(next_event)?;
+            for (_, next_event) in next_pending_events {
+                self.handle_next_event(next_event)?;
+            }
         }
 
         Ok(())
@@ -402,11 +414,17 @@ where
 
     fn handle_next_event(
         &mut self,
-        next_event: SuccessfulTransactionReceipts,
+        next_event: TransactionReceipts,
     ) -> anyhow::Result<()> {
         let checkpoint_height = *self.checkpoint_height.borrow();
+        let next_checkpoint_height = checkpoint_height.succ().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to increment checkpoint height from {}",
+                checkpoint_height
+            )
+        })?;
 
-        if next_event.tx_pointer.block_height() <= checkpoint_height {
+        if next_event.tx_pointer.block_height() < next_checkpoint_height {
             tracing::warn!(
                 "Received pre-confirmation event for block height {} which is <= checkpoint height {}",
                 next_event.tx_pointer.block_height(),
@@ -422,26 +440,23 @@ where
             .insert(next_event.tx_pointer.tx_index(), next_event);
 
         while let Some(mut entry) = self.pending_events.first_entry() {
-            if entry.key() <= &checkpoint_height {
+            if entry.key() < &next_checkpoint_height {
                 tracing::warn!(
                     "Service in incorrect state {} which is <= checkpoint height {}",
                     entry.key(),
-                    checkpoint_height
+                    next_checkpoint_height
                 );
 
                 entry.remove();
                 continue;
             }
 
+            // Pending events are from the future
+            if entry.key() != &next_checkpoint_height {
+                break;
+            }
+
             while let Some(event_entry) = entry.get_mut().first_entry() {
-                let checkpoint_height = *self.checkpoint_height.borrow();
-                let next_checkpoint_height =
-                    checkpoint_height.succ().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Failed to increment checkpoint height from {}",
-                            checkpoint_height
-                        )
-                    })?;
                 let tx_index = self.emitted_events.len();
                 let next_tx_pointer =
                     TxPointer::new(next_checkpoint_height, tx_index as u16);
@@ -540,7 +555,7 @@ where
                     }
                     Some(block) => {
                         // TODO: It is bad idea to have an `await` inside of the `tokio::select!`.
-                        if let Err(err) = self.handle_heartbeat(block).await {
+                        if let Err(err) = self.handle_heartbeat(block, true).await {
                             tracing::error!("Failed to handle heartbeat: {err:?}");
                             fuel_core_services::TaskNextAction::Stop
                         } else {
@@ -796,7 +811,7 @@ where
     pub fn receipts_at(
         &self,
         block_height: &BlockHeight,
-    ) -> anyhow::Result<Option<Vec<SuccessfulTransactionReceipts>>> {
+    ) -> anyhow::Result<Option<Vec<TransactionReceipts>>> {
         let events = self
             .storage
             .read_transaction()

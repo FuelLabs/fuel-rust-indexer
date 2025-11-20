@@ -4,15 +4,11 @@ use fuel_core_storage::{
     iter::IterableStore,
     kv_store::KeyValueInspect,
 };
-use fuel_core_types::{
-    fuel_tx::{
-        Receipt,
-        TxId,
-        TxPointer,
-    },
-    fuel_types::BlockHeight,
+use fuel_core_types::fuel_types::BlockHeight;
+use fuel_indexer_types::events::{
+    SuccessfulTransactionReceipts,
+    UnstableReceipts,
 };
-use fuel_indexer_types::events::UnstableReceipts;
 use fuel_storage_utils::CommitLazyChanges;
 use std::borrow::Borrow;
 
@@ -50,9 +46,7 @@ pub trait ReceiptsProcessor: Send + Sync + 'static {
 
     fn process_transaction_receipts<'a>(
         &'a self,
-        tx_pointer: TxPointer,
-        tx_id: TxId,
-        receipts: impl Iterator<Item = &'a Receipt> + 'a,
+        receipts: &'a SuccessfulTransactionReceipts,
     ) -> impl Iterator<Item = Self::Event> + 'a;
 }
 

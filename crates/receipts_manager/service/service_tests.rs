@@ -91,10 +91,11 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     assert_eq!(
         result,
         vec![
-            UnstableReceipts::Receipts(SuccessfulTransactionReceipts {
+            UnstableReceipts::Receipts(TransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),
+                execution_status: ExecutionStatus::Success,
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
@@ -143,10 +144,11 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
     assert_eq!(
         result,
         vec![
-            UnstableReceipts::Receipts(SuccessfulTransactionReceipts {
+            UnstableReceipts::Receipts(TransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),
+                execution_status: ExecutionStatus::Success,
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
@@ -203,10 +205,11 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
     assert_eq!(
         result,
         vec![
-            UnstableReceipts::Receipts(SuccessfulTransactionReceipts {
+            UnstableReceipts::Receipts(TransactionReceipts {
                 tx_pointer: TxPointer::new(1u32.into(), 0),
                 tx_id: default_tx_id(),
                 receipts: Arc::new(vec![]),
+                execution_status: ExecutionStatus::Success,
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
