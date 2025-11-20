@@ -146,6 +146,7 @@ where
 {
     storage: S,
     events: Vec<TransactionEvents<Processor::Event>>,
+    skipped_events: usize,
     processor: Processor,
     event_source: BoxStream<anyhow::Result<UnstableReceipts>>,
     streams: StreamsSource,
@@ -190,6 +191,7 @@ where
         let mut task = Task {
             storage,
             events: Default::default(),
+            skipped_events: 0,
             processor,
             // Set it via `reconnect_service_events_stream` later
             event_source: futures::stream::empty().into_boxed(),
@@ -233,6 +235,7 @@ where
         self.event_source = event_source;
         self.broadcast_unstable_event(UnstableEvent::Rollback(starting_height));
         self.events.clear();
+        self.skipped_events = 0;
 
         Ok(())
     }
@@ -274,6 +277,7 @@ where
                                 receipts.tx_id,
                                 receipts.execution_status
                             );
+                            self.skipped_events = self.skipped_events.saturating_add(1);
                             return Ok(());
                         };
 
@@ -296,7 +300,8 @@ where
                     UnstableReceipts::Checkpoint(checkpoint) => {
                         // This may happen when the service was start at the middle of the block
                         // production.
-                        if checkpoint.events_count != self.events.len()
+                        if checkpoint.events_count
+                            != self.events.len().saturating_add(self.skipped_events)
                             || next_block_height != checkpoint.block_height
                         {
                             return self.reconnect_service_events_stream();
@@ -338,6 +343,7 @@ where
                         } else {
                             self.events.clear();
                         }
+                        self.skipped_events = 0;
 
                         tracing::info!(
                             "Checkpoint at height {} with {} events",
@@ -349,6 +355,7 @@ where
                     UnstableReceipts::Rollback(at) => {
                         self.broadcast_unstable_event(UnstableEvent::Rollback(at));
                         self.events.clear();
+                        self.skipped_events = 0;
                     }
                 }
             }
