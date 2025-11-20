@@ -33,7 +33,7 @@ fuel-core-storage = { workspace = true }
 fuel-core-types = { workspace = true, features = ["serde", "test-helpers"] }
 fuel-indexer-types = { workspace = true }
 fuel-storage-utils = { workspace = true }
-fuels = { workspace = true, features = ["accounts-signer-aws-kms"] }
+fuels = { workspace = true }
 futures = { workspace = true }
 futures-core = "0.3.31"
 futures-util = "0.3.31"
