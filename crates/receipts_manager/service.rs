@@ -409,6 +409,8 @@ where
             }
         }
 
+        tokio::task::yield_now().await;
+
         Ok(())
     }
 
