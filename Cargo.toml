@@ -45,9 +45,9 @@ url = "2"
 
 [patch.crates-io]
 fuels = { git = "https://github.com/FuelLabs/fuels-rs/", branch = "refactor/connect-with-urls-accept-str-slice" }
-fuel-core = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
-fuel-core-chain-config = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
-fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
-fuel-core-services = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
-fuel-core-storage = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
-fuel-core-types = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core = { git = "https://github.com/FuelLabs/fuel-core", rev = "fix/change-with-urls-signature" }
+fuel-core-chain-config = { git = "https://github.com/FuelLabs/fuel-core", rev = "fix/change-with-urls-signature" }
+fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", rev = "fix/change-with-urls-signature" }
+fuel-core-services = { git = "https://github.com/FuelLabs/fuel-core", rev = "fix/change-with-urls-signature" }
+fuel-core-storage = { git = "https://github.com/FuelLabs/fuel-core", rev = "fix/change-with-urls-signature" }
+fuel-core-types = { git = "https://github.com/FuelLabs/fuel-core", rev = "fix/change-with-urls-signature" }
