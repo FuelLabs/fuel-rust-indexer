@@ -207,7 +207,7 @@ where
         blocks_request_concurrency,
     } = config;
 
-    let client = Arc::new(FuelClient::with_urls(fuel_graphql_urls)?);
+    let client = Arc::new(FuelClient::with_urls(&fuel_graphql_urls)?);
 
     let graphql_event_adapter_config = graphql_event_adapter::GraphqlEventAdapterConfig {
         client,
