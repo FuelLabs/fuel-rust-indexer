@@ -23,12 +23,12 @@ anyhow = "1.0.66"
 async-trait = { version = "0.1" }
 clap = { version = "4", default-features = false, features = ["derive"] }
 enum-iterator = { version = "1.2" }
-fuel-core = { version = "0.47.1" }
-fuel-core-chain-config = { version = "0.47.1" }
-fuel-core-client = { version = "0.47.1" }
-fuel-core-services = { version = "0.47.1" }
-fuel-core-storage = { version = "0.47.1" }
-fuel-core-types = { version = "0.47.1" }
+fuel-core = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-chain-config = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-services = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-storage = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-types = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
 fuel-event-streams = { path = "crates/event_streams" }
 fuel-events-manager = { path = "crates/events_manager" }
 fuel-indexer-types = { path = "crates/types" }
@@ -44,4 +44,10 @@ tracing = "0.1"
 url = "2"
 
 [patch.crates-io]
-fuels = { git = "https://github.com/FuelLabs/fuels-rs/", branch = "feature/log-id-expose" }
+fuels = { git = "https://github.com/FuelLabs/fuels-rs/", branch = "refactor/connect-with-urls-accept-str-slice" }
+fuel-core = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-chain-config = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-services = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-storage = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }
+fuel-core-types = { git = "https://github.com/FuelLabs/fuel-core", rev = "7cb0fdcf74acd7da35f5b93e264c353012a937ea" }

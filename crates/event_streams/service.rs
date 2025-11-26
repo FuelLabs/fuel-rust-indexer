@@ -18,7 +18,7 @@ use fuel_receipts_manager::adapters::{
     ReceiptGraphqlManager,
     graphql_event_adapter,
 };
-use fuels::client::FuelClient;
+use fuel_core_client::client::FuelClient;
 use std::{
     num::NonZeroUsize,
     sync::Arc,
@@ -34,7 +34,9 @@ use fuel_indexer_types::events::BlockEvent;
 pub struct Config {
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
-    pub fuel_graphql_url: Url,
+    /// List of Fuel GraphQL URLs for failover support.
+    /// The FuelClient will automatically switch to the next URL if one fails.
+    pub fuel_graphql_urls: Vec<Url>,
     pub heartbeat_capacity: NonZeroUsize,
     pub event_capacity: NonZeroUsize,
     pub blocks_request_batch_size: usize,
@@ -45,12 +47,12 @@ impl Config {
     pub fn new(
         starting_block_height: BlockHeight,
         use_preconfirmations: bool,
-        url: Url,
+        urls: Vec<Url>,
     ) -> Self {
         Self {
             starting_block_height,
             use_preconfirmations,
-            fuel_graphql_url: url,
+            fuel_graphql_urls: urls,
             heartbeat_capacity: NonZeroUsize::new(1000).expect("Is not zero; qed"),
             event_capacity: NonZeroUsize::new(10000).expect("Is not zero; qed"),
             blocks_request_batch_size: 10,
@@ -198,14 +200,14 @@ where
     let Config {
         starting_block_height,
         use_preconfirmations,
-        fuel_graphql_url,
+        fuel_graphql_urls,
         heartbeat_capacity,
         event_capacity,
         blocks_request_batch_size,
         blocks_request_concurrency,
     } = config;
 
-    let client = Arc::new(FuelClient::new(fuel_graphql_url)?);
+    let client = Arc::new(FuelClient::with_urls(fuel_graphql_urls)?);
 
     let graphql_event_adapter_config = graphql_event_adapter::GraphqlEventAdapterConfig {
         client,
