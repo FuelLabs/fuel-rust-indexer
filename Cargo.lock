@@ -1857,7 +1857,7 @@ dependencies = [
 [[package]]
 name = "fuel-core"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -1867,24 +1867,24 @@ dependencies = [
  "clap",
  "derive_more 0.99.20",
  "enum-iterator",
- "fuel-core-chain-config 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-chain-config",
  "fuel-core-compression-service",
  "fuel-core-consensus-module",
  "fuel-core-database",
  "fuel-core-executor",
  "fuel-core-gas-price-service",
  "fuel-core-importer",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-metrics",
  "fuel-core-p2p",
- "fuel-core-poa 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-poa",
  "fuel-core-producer",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-services",
  "fuel-core-shared-sequencer",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-storage",
  "fuel-core-syscall",
  "fuel-core-tx-status-manager",
  "fuel-core-txpool",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-types",
  "fuel-core-upgradable-executor",
  "futures",
  "hex",
@@ -1919,32 +1919,13 @@ dependencies = [
 [[package]]
 name = "fuel-core-chain-config"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature#01fcdbb5776955ee6760052d9aa0e192409f1536"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "bech32",
  "educe",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "itertools 0.12.1",
- "postcard",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "serde_with",
- "tracing",
-]
-
-[[package]]
-name = "fuel-core-chain-config"
-version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
-dependencies = [
- "anyhow",
- "bech32",
- "educe",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-storage",
+ "fuel-core-types",
  "itertools 0.12.1",
  "postcard",
  "rand 0.8.5",
@@ -1957,39 +1938,14 @@ dependencies = [
 [[package]]
 name = "fuel-core-client"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature#01fcdbb5776955ee6760052d9aa0e192409f1536"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "cynic",
  "derive_more 0.99.20",
  "eventsource-client",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "futures",
- "hex",
- "hyper-rustls 0.24.2",
- "itertools 0.12.1",
- "postcard",
- "reqwest 0.12.24",
- "schemafy_lib",
- "serde",
- "serde_json",
- "tai64",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "fuel-core-client"
-version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "cynic",
- "derive_more 0.99.20",
- "eventsource-client",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-types",
  "futures",
  "hex",
  "hyper-rustls 0.24.2",
@@ -2007,11 +1963,11 @@ dependencies = [
 [[package]]
 name = "fuel-core-compression"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "enum_dispatch",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-types",
  "paste",
  "serde",
  "strum 0.25.0",
@@ -2021,16 +1977,16 @@ dependencies = [
 [[package]]
 name = "fuel-core-compression-service"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
  "enum-iterator",
  "fuel-core-compression",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-metrics",
+ "fuel-core-services",
+ "fuel-core-storage",
+ "fuel-core-types",
  "futures",
  "paste",
  "serde",
@@ -2044,35 +2000,35 @@ dependencies = [
 [[package]]
 name = "fuel-core-consensus-module"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
- "fuel-core-chain-config 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-poa 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-chain-config",
+ "fuel-core-poa",
+ "fuel-core-storage",
+ "fuel-core-types",
 ]
 
 [[package]]
 name = "fuel-core-database"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "derive_more 0.99.20",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-storage",
+ "fuel-core-types",
 ]
 
 [[package]]
 name = "fuel-core-executor"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-storage",
  "fuel-core-syscall",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-types",
  "parking_lot",
  "serde",
  "sha2 0.10.9",
@@ -2082,15 +2038,15 @@ dependencies = [
 [[package]]
 name = "fuel-core-gas-price-service"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
  "enum-iterator",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-metrics",
+ "fuel-core-services",
+ "fuel-core-storage",
+ "fuel-core-types",
  "fuel-gas-price-algorithm",
  "futures",
  "num_enum",
@@ -2110,13 +2066,13 @@ dependencies = [
 [[package]]
 name = "fuel-core-importer"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "derive_more 0.99.20",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-metrics",
+ "fuel-core-storage",
+ "fuel-core-types",
  "mockall",
  "rayon",
  "tokio",
@@ -2126,22 +2082,7 @@ dependencies = [
 [[package]]
 name = "fuel-core-metrics"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature#01fcdbb5776955ee6760052d9aa0e192409f1536"
-dependencies = [
- "once_cell",
- "parking_lot",
- "pin-project-lite",
- "prometheus-client",
- "regex",
- "strum 0.25.0",
- "strum_macros 0.25.3",
- "tracing",
-]
-
-[[package]]
-name = "fuel-core-metrics"
-version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "once_cell",
  "parking_lot",
@@ -2156,15 +2097,15 @@ dependencies = [
 [[package]]
 name = "fuel-core-p2p"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
- "fuel-core-chain-config 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-chain-config",
+ "fuel-core-metrics",
+ "fuel-core-services",
+ "fuel-core-storage",
+ "fuel-core-types",
  "futures",
  "hex",
  "hickory-resolver",
@@ -2187,33 +2128,14 @@ dependencies = [
 [[package]]
 name = "fuel-core-poa"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature#01fcdbb5776955ee6760052d9aa0e192409f1536"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
- "fuel-core-chain-config 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
-name = "fuel-core-poa"
-version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
-dependencies = [
- "anyhow",
- "async-trait",
- "fuel-core-chain-config 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-chain-config",
+ "fuel-core-services",
+ "fuel-core-storage",
+ "fuel-core-types",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -2225,13 +2147,13 @@ dependencies = [
 [[package]]
 name = "fuel-core-producer"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
  "derive_more 0.99.20",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-storage",
+ "fuel-core-types",
  "tokio",
  "tokio-rayon",
  "tracing",
@@ -2240,26 +2162,11 @@ dependencies = [
 [[package]]
 name = "fuel-core-services"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature#01fcdbb5776955ee6760052d9aa0e192409f1536"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "futures",
- "parking_lot",
- "pin-project-lite",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "fuel-core-services"
-version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
-dependencies = [
- "anyhow",
- "async-trait",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-metrics",
  "futures",
  "parking_lot",
  "pin-project-lite",
@@ -2271,15 +2178,15 @@ dependencies = [
 [[package]]
 name = "fuel-core-shared-sequencer"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
  "cosmos-sdk-proto",
  "cosmrs",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-services",
+ "fuel-core-types",
  "fuel-sequencer-proto",
  "futures",
  "postcard",
@@ -2296,33 +2203,12 @@ dependencies = [
 [[package]]
 name = "fuel-core-storage"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature#01fcdbb5776955ee6760052d9aa0e192409f1536"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "derive_more 0.99.20",
  "enum-iterator",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-vm",
- "impl-tools",
- "itertools 0.12.1",
- "num_enum",
- "paste",
- "postcard",
- "primitive-types",
- "serde",
- "strum 0.25.0",
- "strum_macros 0.25.3",
-]
-
-[[package]]
-name = "fuel-core-storage"
-version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
-dependencies = [
- "anyhow",
- "derive_more 0.99.20",
- "enum-iterator",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-types",
  "fuel-vm",
  "impl-tools",
  "itertools 0.12.1",
@@ -2340,9 +2226,9 @@ dependencies = [
 [[package]]
 name = "fuel-core-syscall"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-types",
  "parking_lot",
  "tracing",
 ]
@@ -2350,13 +2236,13 @@ dependencies = [
 [[package]]
 name = "fuel-core-tx-status-manager"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-metrics",
+ "fuel-core-services",
+ "fuel-core-types",
  "futures",
  "parking_lot",
  "postcard",
@@ -2368,16 +2254,16 @@ dependencies = [
 [[package]]
 name = "fuel-core-txpool"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "async-trait",
  "derive_more 0.99.20",
- "fuel-core-metrics 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-metrics",
+ "fuel-core-services",
+ "fuel-core-storage",
  "fuel-core-syscall",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-types",
  "futures",
  "lru 0.13.0",
  "num-rational",
@@ -2390,28 +2276,7 @@ dependencies = [
 [[package]]
 name = "fuel-core-types"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature#01fcdbb5776955ee6760052d9aa0e192409f1536"
-dependencies = [
- "anyhow",
- "bs58",
- "derive_more 0.99.20",
- "ed25519",
- "ed25519-dalek",
- "educe",
- "fuel-vm",
- "k256",
- "parking_lot",
- "rand 0.8.5",
- "secrecy",
- "serde",
- "tai64",
- "zeroize",
-]
-
-[[package]]
-name = "fuel-core-types"
-version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "anyhow",
  "bs58",
@@ -2432,11 +2297,11 @@ dependencies = [
 [[package]]
 name = "fuel-core-upgradable-executor"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "fuel-core-executor",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-storage",
+ "fuel-core-types",
  "futures",
  "parking_lot",
 ]
@@ -2481,9 +2346,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "fuel-core",
- "fuel-core-client 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-client",
+ "fuel-core-services",
+ "fuel-core-types",
  "fuel-events-manager",
  "fuel-indexer-types",
  "fuel-receipts-manager",
@@ -2503,9 +2368,9 @@ dependencies = [
  "clap",
  "enum-iterator",
  "fuel-core",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-services",
+ "fuel-core-storage",
+ "fuel-core-types",
  "fuel-indexer-types",
  "fuel-storage-utils",
  "futures",
@@ -2520,7 +2385,7 @@ dependencies = [
 [[package]]
 name = "fuel-gas-price-algorithm"
 version = "0.47.1"
-source = "git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080#49070f73af0d018a0193435e9a71e6c865e56080"
+source = "git+https://github.com/FuelLabs/fuel-core?rev=6889ed156bef3d3ad89b6553e500c7a8500e41d3#6889ed156bef3d3ad89b6553e500c7a8500e41d3"
 dependencies = [
  "serde",
  "thiserror 2.0.17",
@@ -2532,7 +2397,7 @@ name = "fuel-indexer-types"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-types",
  "serde",
 ]
 
@@ -2561,11 +2426,11 @@ dependencies = [
  "cynic",
  "enum-iterator",
  "fuel-core",
- "fuel-core-chain-config 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-client 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-chain-config",
+ "fuel-core-client",
+ "fuel-core-services",
+ "fuel-core-storage",
+ "fuel-core-types",
  "fuel-indexer-types",
  "fuel-storage-utils",
  "fuels",
@@ -2607,7 +2472,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "fuel-core",
- "fuel-core-storage 0.47.1 (git+https://github.com/FuelLabs/fuel-core?rev=49070f73af0d018a0193435e9a71e6c865e56080)",
+ "fuel-core-storage",
  "serde",
 ]
 
@@ -2686,9 +2551,9 @@ dependencies = [
 [[package]]
 name = "fuels"
 version = "0.76.0"
-source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#c435de64a632081d4c7bac897e91ac0348e217cd"
+source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#b42bcdac6d236c44572a47bd86c0ef024fdaeab8"
 dependencies = [
- "fuel-core-client 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
+ "fuel-core-client",
  "fuel-crypto",
  "fuel-tx",
  "fuels-accounts",
@@ -2701,13 +2566,13 @@ dependencies = [
 [[package]]
 name = "fuels-accounts"
 version = "0.76.0"
-source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#c435de64a632081d4c7bac897e91ac0348e217cd"
+source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#b42bcdac6d236c44572a47bd86c0ef024fdaeab8"
 dependencies = [
  "async-trait",
  "chrono",
  "cynic",
- "fuel-core-client 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
+ "fuel-core-client",
+ "fuel-core-types",
  "fuel-crypto",
  "fuel-tx",
  "fuel-types",
@@ -2726,7 +2591,7 @@ dependencies = [
 [[package]]
 name = "fuels-code-gen"
 version = "0.76.0"
-source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#c435de64a632081d4c7bac897e91ac0348e217cd"
+source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#b42bcdac6d236c44572a47bd86c0ef024fdaeab8"
 dependencies = [
  "Inflector",
  "fuel-abi-types",
@@ -2741,16 +2606,16 @@ dependencies = [
 [[package]]
 name = "fuels-core"
 version = "0.76.0"
-source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#c435de64a632081d4c7bac897e91ac0348e217cd"
+source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#b42bcdac6d236c44572a47bd86c0ef024fdaeab8"
 dependencies = [
  "async-trait",
  "auto_impl",
  "chrono",
  "fuel-abi-types",
  "fuel-asm",
- "fuel-core-chain-config 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-client 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
+ "fuel-core-chain-config",
+ "fuel-core-client",
+ "fuel-core-types",
  "fuel-crypto",
  "fuel-tx",
  "fuel-types",
@@ -2770,7 +2635,7 @@ dependencies = [
 [[package]]
 name = "fuels-macros"
 version = "0.76.0"
-source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#c435de64a632081d4c7bac897e91ac0348e217cd"
+source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#b42bcdac6d236c44572a47bd86c0ef024fdaeab8"
 dependencies = [
  "fuels-code-gen",
  "itertools 0.12.1",
@@ -2782,7 +2647,7 @@ dependencies = [
 [[package]]
 name = "fuels-programs"
 version = "0.76.0"
-source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#c435de64a632081d4c7bac897e91ac0348e217cd"
+source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#b42bcdac6d236c44572a47bd86c0ef024fdaeab8"
 dependencies = [
  "async-trait",
  "fuel-abi-types",
@@ -2800,13 +2665,13 @@ dependencies = [
 [[package]]
 name = "fuels-test-helpers"
 version = "0.76.0"
-source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#c435de64a632081d4c7bac897e91ac0348e217cd"
+source = "git+https://github.com/FuelLabs/fuels-rs/?branch=refactor%2Fconnect-with-urls-accept-str-slice#b42bcdac6d236c44572a47bd86c0ef024fdaeab8"
 dependencies = [
- "fuel-core-chain-config 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-client 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-poa 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-services 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
- "fuel-core-types 0.47.1 (git+https://github.com/FuelLabs/fuel-core?branch=fix%2Fchange-with-urls-signature)",
+ "fuel-core-chain-config",
+ "fuel-core-client",
+ "fuel-core-poa",
+ "fuel-core-services",
+ "fuel-core-types",
  "fuel-crypto",
  "fuel-tx",
  "fuel-types",
@@ -5386,7 +5251,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -7731,7 +7596,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

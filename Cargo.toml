@@ -23,12 +23,12 @@ anyhow = "1.0.66"
 async-trait = { version = "0.1" }
 clap = { version = "4", default-features = false, features = ["derive"] }
 enum-iterator = { version = "1.2" }
-fuel-core = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-chain-config = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-services = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-storage = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-types = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
+fuel-core = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-chain-config = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-services = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-storage = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-types = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
 fuel-event-streams = { path = "crates/event_streams" }
 fuel-events-manager = { path = "crates/events_manager" }
 fuel-indexer-types = { path = "crates/types" }
@@ -45,9 +45,9 @@ url = "2"
 
 [patch.crates-io]
 fuels = { git = "https://github.com/FuelLabs/fuels-rs/", branch = "refactor/connect-with-urls-accept-str-slice" }
-fuel-core = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-chain-config = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-services = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-storage = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
-fuel-core-types = { git = "https://github.com/FuelLabs/fuel-core", rev = "49070f73af0d018a0193435e9a71e6c865e56080" }
+fuel-core = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-chain-config = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-services = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-storage = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
+fuel-core-types = { git = "https://github.com/FuelLabs/fuel-core", rev = "6889ed156bef3d3ad89b6553e500c7a8500e41d3" }
