@@ -550,6 +550,28 @@ impl Fetcher for GraphqlFetcher {
     }
 }
 
+impl GraphqlFetcher {
+    /// Returns a stream of finalized blocks starting from the given height.
+    pub async fn blocks_stream_starting_from(
+        &self,
+        start: BlockHeight,
+    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<FinalizedBlock>>> {
+        let real_time = self.finalized_blocks_stream()?;
+        let last_height = self.last_height().await?;
+
+        let real_time = real_time
+            .skip_while(move |block| {
+                let skip = *block.header.height() <= last_height;
+
+                async move { skip }
+            })
+            .map(Result::<_, anyhow::Error>::Ok);
+
+        let old_blocks_stream = self.finalized_blocks_for_range(*start..=*last_height);
+        Ok(old_blocks_stream.chain(real_time))
+    }
+}
+
 pub fn create_graphql_event_adapter(config: GraphqlEventAdapterConfig) -> GraphqlFetcher {
     GraphqlFetcher {
         client: config.client,
