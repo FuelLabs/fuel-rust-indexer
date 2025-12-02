@@ -40,11 +40,12 @@ pub type Storage = Database<Description>;
 
 pub fn open_database(
     db_path: &Path,
+    state_rewind_policy: StateRewindPolicy,
     database_config: DatabaseConfig,
 ) -> anyhow::Result<Database<Description>> {
     Ok(Database::<Description>::open_rocksdb(
         db_path,
-        StateRewindPolicy::NoRewind,
+        state_rewind_policy,
         database_config,
     )?)
 }

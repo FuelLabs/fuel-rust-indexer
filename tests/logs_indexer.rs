@@ -4,9 +4,12 @@ use fuel_core::{
         FuelService,
         ServiceTrait,
     },
-    state::rocks_db::{
-        ColumnsPolicy,
-        DatabaseConfig,
+    state::{
+        historical_rocksdb::StateRewindPolicy,
+        rocks_db::{
+            ColumnsPolicy,
+            DatabaseConfig,
+        },
     },
 };
 use fuel_event_streams::{
@@ -64,6 +67,7 @@ async fn defining_logs_indexer__stable_logs() {
     let indexer = fuel_event_streams::service::new_logs_streams(
         parse_o2_logs,
         temp_dir.path().to_path_buf(),
+        StateRewindPolicy::NoRewind,
         database_config,
         StreamsConfig::new(0u32.into(), true, vec![url]),
     )
@@ -95,6 +99,7 @@ async fn defining_logs_indexer__unstable_logs() {
     let indexer = fuel_event_streams::service::new_logs_streams(
         parse_o2_logs,
         temp_dir.path().to_path_buf(),
+        StateRewindPolicy::NoRewind,
         database_config,
         StreamsConfig::new(0u32.into(), true, vec![url]),
     )
@@ -126,6 +131,7 @@ async fn defining_logs_indexer__blocks() {
     let indexer = fuel_event_streams::service::new_logs_streams(
         parse_o2_logs,
         temp_dir.path().to_path_buf(),
+        StateRewindPolicy::NoRewind,
         database_config,
         StreamsConfig::new(0u32.into(), true, vec![url]),
     )

@@ -248,7 +248,10 @@ mod rocksdb {
         adapters::SimplerProcessorAdapter,
         processors::simple_processor::FnReceiptParser,
     };
-    use fuel_core::state::rocks_db::DatabaseConfig;
+    use fuel_core::state::{
+        historical_rocksdb::StateRewindPolicy,
+        rocks_db::DatabaseConfig,
+    };
     use fuel_core_types::fuel_tx::Receipt;
     use fuels::core::codec::DecoderConfig;
     use std::path::PathBuf;
@@ -264,6 +267,7 @@ mod rocksdb {
     pub fn new_logs_streams<Fn, Event>(
         parser: Fn,
         path: PathBuf,
+        state_rewind_policy: StateRewindPolicy,
         database_config: DatabaseConfig,
         config: Config,
     ) -> anyhow::Result<LogsStreamsService<Fn>>
@@ -279,10 +283,14 @@ mod rocksdb {
 
         let receipts_storage = fuel_receipts_manager::rocksdb::open_database(
             path.as_path(),
+            state_rewind_policy.clone(),
             database_config,
         )?;
-        let events_storage =
-            fuel_events_manager::rocksdb::open_database(path.as_path(), database_config)?;
+        let events_storage = fuel_events_manager::rocksdb::open_database(
+            path.as_path(),
+            state_rewind_policy,
+            database_config,
+        )?;
         new_service(
             config,
             SimplerProcessorAdapter::new(parser),
