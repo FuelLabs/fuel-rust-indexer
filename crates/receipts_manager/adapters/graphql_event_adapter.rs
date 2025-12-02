@@ -561,7 +561,8 @@ impl GraphqlFetcher {
 
         let real_time = real_time
             .skip_while(move |block| {
-                let skip = *block.header.height() <= last_height;
+                let skip = *block.header.height() <= last_height
+                    || *block.header.height() < start;
 
                 async move { skip }
             })
