@@ -19,6 +19,7 @@ rocksdb = [
 ]
 blocks-subscription = []
 clap = ["dep:clap"]
+test-helpers = ["rocksdb", "fuel-storage-utils/test-helpers"]
 
 [dependencies]
 anyhow = { workspace = true }

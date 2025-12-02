@@ -48,3 +48,13 @@ pub fn open_database(
         database_config,
     )?)
 }
+
+/// Commits an empty block at the specified height to the database.
+/// This is primarily used for testing rollback functionality.
+#[cfg(any(test, feature = "test-helpers"))]
+pub fn commit_height(
+    database: &mut Storage,
+    height: BlockHeight,
+) -> anyhow::Result<()> {
+    fuel_storage_utils::rocksdb::commit_height(database, height)
+}

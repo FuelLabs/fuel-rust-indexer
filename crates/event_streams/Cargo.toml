@@ -20,6 +20,7 @@ rocksdb = [
 ]
 blocks-subscription = ["fuel-receipts-manager/blocks-subscription"]
 clap = ["fuel-receipts-manager/clap", "fuel-events-manager/clap"]
+test-helpers = ["rocksdb", "fuel-receipts-manager/test-helpers", "fuel-events-manager/test-helpers"]
 
 [dependencies]
 anyhow = { workspace = true }
