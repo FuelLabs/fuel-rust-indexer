@@ -555,7 +555,7 @@ impl GraphqlFetcher {
     pub async fn blocks_stream_starting_from(
         &self,
         start: BlockHeight,
-    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<FinalizedBlock>>> {
+    ) -> anyhow::Result<BoxStream<anyhow::Result<FinalizedBlock>>> {
         let real_time = self.finalized_blocks_stream()?;
         let last_height = self.last_height().await?;
 
@@ -568,7 +568,7 @@ impl GraphqlFetcher {
             .map(Result::<_, anyhow::Error>::Ok);
 
         let old_blocks_stream = self.finalized_blocks_for_range(*start..=*last_height);
-        Ok(old_blocks_stream.chain(real_time))
+        Ok(old_blocks_stream.chain(real_time).into_boxed())
     }
 }
 
