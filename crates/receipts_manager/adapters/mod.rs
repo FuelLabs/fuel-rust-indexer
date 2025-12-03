@@ -40,6 +40,7 @@ pub struct ManagerConfig {
     pub event_capacity: NonZeroUsize,
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
+    pub pending_blocks_limit: usize,
 }
 
 pub type ReceiptGraphqlManager<Database> =
@@ -60,6 +61,7 @@ where
         event_capacity,
         blocks_request_batch_size,
         blocks_request_concurrency,
+        pending_blocks_limit,
     } = config;
 
     let client = Arc::new(FuelClient::new(fuel_graphql_url)?);
@@ -69,6 +71,7 @@ where
         event_capacity,
         blocks_request_batch_size,
         blocks_request_concurrency,
+        pending_blocks_limit,
     };
     let fetcher =
         graphql_event_adapter::create_graphql_event_adapter(graphql_event_adapter_config);

@@ -92,6 +92,7 @@ use fuel_core_types::{
     fuel_tx::Transaction,
     fuel_types::canonical::Deserialize,
 };
+use tokio::sync::watch;
 
 #[cfg(test)]
 pub mod tests;
@@ -106,6 +107,7 @@ pub struct GraphqlFetcher {
     heartbeat_capacity: NonZeroUsize,
     blocks_request_batch_size: usize,
     blocks_request_concurrency: usize,
+    pending_blocks_limit: usize,
 }
 
 pub struct GraphqlEventAdapterConfig {
@@ -114,6 +116,7 @@ pub struct GraphqlEventAdapterConfig {
     pub event_capacity: NonZeroUsize,
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
+    pub pending_blocks_limit: usize,
 }
 
 impl Fetcher for GraphqlFetcher {
@@ -330,11 +333,16 @@ impl Fetcher for GraphqlFetcher {
         &self,
         range: RangeInclusive<u32>,
     ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> + Send + 'static {
+        let controller = PendingBlocksController::new(
+            (*range.start()).into(),
+            self.pending_blocks_limit,
+        );
         let blocks_unordered_stream = blocks_for_batched(
             self.client.clone(),
             *range.start()..range.end().saturating_add(1),
             self.blocks_request_batch_size,
             self.blocks_request_concurrency,
+            controller.clone(),
         );
 
         let unordered_stream = blocks_unordered_stream.filter_map(|block| async move {
@@ -537,6 +545,8 @@ impl Fetcher for GraphqlFetcher {
                         break;
                     }
                 }
+
+                controller.set_latest_height((*remaining_range.start()).into());
             }
         });
 
@@ -580,6 +590,7 @@ pub fn create_graphql_event_adapter(config: GraphqlEventAdapterConfig) -> Graphq
         heartbeat_capacity: config.heartbeat_capacity,
         blocks_request_batch_size: config.blocks_request_batch_size,
         blocks_request_concurrency: config.blocks_request_concurrency,
+        pending_blocks_limit: config.pending_blocks_limit,
     }
 }
 
@@ -588,6 +599,7 @@ pub fn blocks_for_batched(
     range: Range<u32>,
     window_size: usize,
     concurrency: usize,
+    controller: PendingBlocksController,
 ) -> impl Stream<Item = FullBlock> + Send + 'static {
     let chunks = range.chunks(window_size);
 
@@ -601,14 +613,16 @@ pub fn blocks_for_batched(
         ranges.push(start..last);
     }
 
-    let iter = ranges
-        .into_iter()
-        .zip(iter::repeat_with(move || client.clone()));
+    let iter = ranges.into_iter().zip(iter::repeat_with(move || {
+        (client.clone(), controller.clone())
+    }));
 
     let stream = futures::stream::iter(iter)
-        .map(|(r, c)| async move {
+        .map(|(r, (c, controller))| async move {
             let start = r.start;
             let last = r.end;
+
+            controller.wait_until_height(r.start.into()).await;
 
             loop {
                 let result = blocks_for(c.as_ref(), start..last).await;
@@ -694,5 +708,144 @@ impl GraphqlFetcher {
             })
             .try_flatten()
             .right_stream()
+    }
+}
+
+#[derive(Clone)]
+pub struct PendingBlocksController {
+    pending_blocks: watch::Sender<BlockHeight>,
+    limit: usize,
+}
+
+impl PendingBlocksController {
+    pub fn new(current_height: BlockHeight, limit: usize) -> Self {
+        let (pending_blocks, _) = watch::channel(current_height);
+        Self {
+            pending_blocks,
+            limit,
+        }
+    }
+
+    pub fn set_latest_height(&self, new_value: BlockHeight) {
+        self.pending_blocks.send_if_modified(|old| {
+            if *old != new_value {
+                *old = new_value;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    pub async fn wait_until_height(&self, wait_height: BlockHeight) {
+        let mut pending_blocks = self.pending_blocks.subscribe();
+
+        loop {
+            let current_value = **pending_blocks.borrow();
+
+            let end_range_height: BlockHeight =
+                current_value.saturating_add(self.limit as u32).into();
+
+            if end_range_height >= wait_height {
+                break;
+            }
+
+            if pending_blocks.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_local {
+    use super::*;
+    use futures_util::FutureExt;
+
+    #[tokio::test]
+    async fn pending_blocks_not_awaits_when_no_blocks() {
+        // Given
+        let controller = PendingBlocksController::new(0u32.into(), 100);
+
+        // When
+        let result = controller.wait_until_height(1u32.into()).now_or_never();
+
+        // Then
+        assert!(
+            result.is_some(),
+            "Expected the future to complete immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_blocks_not_awaits_when_almost_full_blocks() {
+        // Given
+        let controller = PendingBlocksController::new(0u32.into(), 100);
+
+        // When
+        let result = controller.wait_until_height(99u32.into()).now_or_never();
+
+        // Then
+        assert!(
+            result.is_some(),
+            "Expected the future to complete immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_blocks_awaits_when_full_blocks() {
+        // Given
+        let controller = PendingBlocksController::new(0u32.into(), 100);
+
+        // When
+        let result = controller.wait_until_height(101u32.into()).now_or_never();
+
+        // Then
+        assert!(
+            result.is_none(),
+            "Expected the future to not complete immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_blocks_awaits_when_full_blocks_more() {
+        // Given
+        let controller = PendingBlocksController::new(0u32.into(), 100);
+
+        // When
+        let result = controller.wait_until_height(112u32.into()).now_or_never();
+
+        // Then
+        assert!(
+            result.is_none(),
+            "Expected the future to not complete immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_blocks_returns_when_full_blocks_is_not_full_anymore() {
+        let controller = PendingBlocksController::new(0u32.into(), 100);
+
+        // Given
+        tokio::spawn({
+            let controller = controller.clone();
+            async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                controller.set_latest_height(50u32.into());
+            }
+        });
+
+        // When
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            controller.wait_until_height(150u32.into()),
+        )
+        .await;
+
+        // Then
+        assert!(
+            result.is_ok(),
+            "Expected the future to complete after space is available"
+        );
     }
 }
