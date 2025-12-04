@@ -24,3 +24,22 @@ where
             .map_err(Into::into)
     }
 }
+
+/// Commits an empty block at the specified height to the database.
+/// This is primarily used for testing rollback functionality.
+#[cfg(any(test, feature = "test-helpers"))]
+pub fn commit_height<Description>(
+    database: &mut Database<Description>,
+    height: Description::Height,
+) -> anyhow::Result<()>
+where
+    Description: DatabaseDescription,
+    Description::Height: Debug
+        + PartialOrd
+        + DatabaseHeight
+        + serde::Serialize
+        + serde::de::DeserializeOwned,
+{
+    commit_changes_with_height_update(database, Changes::default(), |_| Ok(vec![height]))
+        .map_err(Into::into)
+}

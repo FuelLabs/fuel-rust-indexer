@@ -13,6 +13,7 @@ path = "lib.rs"
 
 [features]
 rocksdb = ["dep:fuel-core", "dep:serde", "fuel-core/rocksdb-production"]
+test-helpers = ["rocksdb"]
 
 [dependencies]
 anyhow = { workspace = true }

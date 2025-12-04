@@ -18,6 +18,7 @@ rocksdb = [
     "fuel-storage-utils/rocksdb",
 ]
 clap = ["dep:clap"]
+test-helpers = ["rocksdb", "fuel-storage-utils/test-helpers"]
 
 [dependencies]
 anyhow = { workspace = true }
