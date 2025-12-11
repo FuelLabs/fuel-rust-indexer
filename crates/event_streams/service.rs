@@ -1,4 +1,5 @@
 use crate::adapters::StreamsAdapter;
+use fuel_core_client::client::FuelClient;
 use fuel_core_services::{
     RunnableService,
     RunnableTask,
@@ -18,7 +19,6 @@ use fuel_receipts_manager::adapters::{
     ReceiptGraphqlManager,
     graphql_event_adapter,
 };
-use fuel_core_client::client::FuelClient;
 use std::{
     num::NonZeroUsize,
     sync::Arc,
@@ -283,7 +283,7 @@ mod rocksdb {
 
         let receipts_storage = fuel_receipts_manager::rocksdb::open_database(
             path.as_path(),
-            state_rewind_policy.clone(),
+            state_rewind_policy,
             database_config,
         )?;
         let events_storage = fuel_events_manager::rocksdb::open_database(
