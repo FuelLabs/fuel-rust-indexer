@@ -19,6 +19,7 @@ impl ConfigExt for GraphqlEventAdapterConfig {
             event_capacity: NonZeroUsize::new(10).unwrap(),
             blocks_request_batch_size: 10,
             blocks_request_concurrency: 200,
+            pending_blocks_limit: 1000000,
         }
     }
 
@@ -29,6 +30,7 @@ impl ConfigExt for GraphqlEventAdapterConfig {
             event_capacity: NonZeroUsize::new(10).unwrap(),
             blocks_request_batch_size: 10,
             blocks_request_concurrency: 200,
+            pending_blocks_limit: 1000000,
         }
     }
 }
