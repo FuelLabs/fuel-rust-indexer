@@ -363,6 +363,19 @@ where
 
         Ok(())
     }
+
+    async fn handle_maybe_event(
+        &mut self,
+        event: Option<anyhow::Result<UnstableReceipts>>,
+    ) -> TaskNextAction {
+        match self.handle_service_event(event).await {
+            Ok(()) => TaskNextAction::Continue,
+            Err(err) => {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                TaskNextAction::ErrorContinue(err)
+            }
+        }
+    }
 }
 
 impl<Processor, S, StreamsSource> RunnableTask for Task<Processor, S, StreamsSource>
@@ -380,12 +393,12 @@ where
             _ = watcher.while_started() => TaskNextAction::Stop,
 
             event = self.event_source.next() => {
-                match self.handle_service_event(event).await {
-                    Ok(()) => TaskNextAction::Continue,
-                    Err(err) =>  {
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        TaskNextAction::ErrorContinue(err)
-                    },
+                tokio::select! {
+                    _ = watcher.while_started() => TaskNextAction::Stop,
+
+                    result = self.handle_maybe_event(event) => {
+                        result
+                    }
                 }
             }
         }

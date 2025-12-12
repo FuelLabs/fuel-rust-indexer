@@ -40,11 +40,22 @@ pub type Storage = Database<Description>;
 
 pub fn open_database(
     db_path: &Path,
+    state_rewind_policy: StateRewindPolicy,
     database_config: DatabaseConfig,
 ) -> anyhow::Result<Database<Description>> {
     Ok(Database::<Description>::open_rocksdb(
         db_path,
-        StateRewindPolicy::NoRewind,
+        state_rewind_policy,
         database_config,
     )?)
+}
+
+/// Commits an empty block at the specified height to the database.
+/// This is primarily used for testing rollback functionality.
+#[cfg(any(test, feature = "test-helpers"))]
+pub fn commit_height(
+    database: &mut Storage,
+    height: BlockHeight,
+) -> anyhow::Result<()> {
+    fuel_storage_utils::rocksdb::commit_height(database, height)
 }
