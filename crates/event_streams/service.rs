@@ -125,7 +125,6 @@ where
                 TaskNextAction::Stop
             }
             _ = self.receipts_manager.await_stop() => {
-
                 TaskNextAction::Stop
             }
             _ = self.events_manager.await_stop() => {
