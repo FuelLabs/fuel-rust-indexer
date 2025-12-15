@@ -599,7 +599,7 @@ where
         self.starting_height
     }
 
-    pub async fn checkpoint_height_stream(&self) -> anyhow::Result<BoxStream<BlockHeight>> {
+    pub async fn checkpoint_height_stream(&self) -> BoxStream<BlockHeight> {
         let mut receiver = self.checkpoint_height.clone();
         tokio_stream::wrappers::WatchStream::new(receiver).boxed()
     }
