@@ -1,4 +1,5 @@
 use crate::adapters::StreamsAdapter;
+use fuel_core_client::client::FuelClient;
 use fuel_core_services::{
     RunnableService,
     RunnableTask,
@@ -18,7 +19,6 @@ use fuel_receipts_manager::adapters::{
     ReceiptGraphqlManager,
     graphql_event_adapter,
 };
-use fuels::client::FuelClient;
 use std::{
     num::NonZeroUsize,
     sync::Arc,
@@ -34,7 +34,9 @@ use fuel_indexer_types::events::BlockEvent;
 pub struct Config {
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
-    pub fuel_graphql_url: Url,
+    /// List of Fuel GraphQL URLs for failover support.
+    /// The FuelClient will automatically switch to the next URL if one fails.
+    pub fuel_graphql_urls: Vec<Url>,
     pub heartbeat_capacity: NonZeroUsize,
     pub event_capacity: NonZeroUsize,
     pub blocks_request_batch_size: usize,
@@ -46,12 +48,12 @@ impl Config {
     pub fn new(
         starting_block_height: BlockHeight,
         use_preconfirmations: bool,
-        url: Url,
+        urls: Vec<Url>,
     ) -> Self {
         Self {
             starting_block_height,
             use_preconfirmations,
-            fuel_graphql_url: url,
+            fuel_graphql_urls: urls,
             heartbeat_capacity: NonZeroUsize::new(1000).expect("Is not zero; qed"),
             event_capacity: NonZeroUsize::new(10000).expect("Is not zero; qed"),
             blocks_request_batch_size: 10,
@@ -123,7 +125,6 @@ where
                 TaskNextAction::Stop
             }
             _ = self.receipts_manager.await_stop() => {
-
                 TaskNextAction::Stop
             }
             _ = self.events_manager.await_stop() => {
@@ -200,7 +201,7 @@ where
     let Config {
         starting_block_height,
         use_preconfirmations,
-        fuel_graphql_url,
+        fuel_graphql_urls,
         heartbeat_capacity,
         event_capacity,
         blocks_request_batch_size,
@@ -208,7 +209,7 @@ where
         pending_blocks_limit,
     } = config;
 
-    let client = Arc::new(FuelClient::new(fuel_graphql_url)?);
+    let client = Arc::new(FuelClient::with_urls(&fuel_graphql_urls)?);
 
     let graphql_event_adapter_config = graphql_event_adapter::GraphqlEventAdapterConfig {
         client,
@@ -250,7 +251,10 @@ mod rocksdb {
         adapters::SimplerProcessorAdapter,
         processors::simple_processor::FnReceiptParser,
     };
-    use fuel_core::state::rocks_db::DatabaseConfig;
+    use fuel_core::state::{
+        historical_rocksdb::StateRewindPolicy,
+        rocks_db::DatabaseConfig,
+    };
     use fuel_core_types::fuel_tx::Receipt;
     use fuels::core::codec::DecoderConfig;
     use std::path::PathBuf;
@@ -266,6 +270,7 @@ mod rocksdb {
     pub fn new_logs_streams<Fn, Event>(
         parser: Fn,
         path: PathBuf,
+        state_rewind_policy: StateRewindPolicy,
         database_config: DatabaseConfig,
         config: Config,
     ) -> anyhow::Result<LogsStreamsService<Fn>>
@@ -281,10 +286,14 @@ mod rocksdb {
 
         let receipts_storage = fuel_receipts_manager::rocksdb::open_database(
             path.as_path(),
+            state_rewind_policy,
             database_config,
         )?;
-        let events_storage =
-            fuel_events_manager::rocksdb::open_database(path.as_path(), database_config)?;
+        let events_storage = fuel_events_manager::rocksdb::open_database(
+            path.as_path(),
+            state_rewind_policy,
+            database_config,
+        )?;
         new_service(
             config,
             SimplerProcessorAdapter::new(parser),

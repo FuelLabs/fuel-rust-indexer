@@ -494,6 +494,7 @@ where
     ) -> fuel_core_services::TaskNextAction {
         tokio::select! {
             biased;
+
             _ = watcher.while_started() => fuel_core_services::TaskNextAction::Stop,
 
             // First we should process pre confirmation events,
@@ -556,12 +557,17 @@ where
                         }
                     }
                     Some(block) => {
-                        // TODO: It is bad idea to have an `await` inside of the `tokio::select!`.
-                        if let Err(err) = self.handle_heartbeat(block, true).await {
-                            tracing::error!("Failed to handle heartbeat: {err:?}");
-                            fuel_core_services::TaskNextAction::Stop
-                        } else {
-                            fuel_core_services::TaskNextAction::Continue
+                        tokio::select! {
+                            result = self.handle_heartbeat(block, true) => {
+                                if let Err(err) = result {
+                                    tracing::error!("Failed to handle heartbeat: {err:?}");
+                                    fuel_core_services::TaskNextAction::Stop
+                                } else {
+                                    fuel_core_services::TaskNextAction::Continue
+                                }
+                            }
+
+                            _ = watcher.while_started() => fuel_core_services::TaskNextAction::Stop,
                         }
                     }
                 }
