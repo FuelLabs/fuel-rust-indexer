@@ -37,8 +37,8 @@ fuel-storage-utils = { path = "crates/storage_utils" }
 fuels = { version = "0.77.0" }
 futures = "0.3"
 serde = { version = "1" }
-strum = { version = "0.25" }
-strum_macros = { version = "0.25" }
+strum = { version = "0.28" }
+strum_macros = { version = "0.28" }
 tokio = { version = "1.48.0" }
 tracing = "0.1"
 url = "2"
