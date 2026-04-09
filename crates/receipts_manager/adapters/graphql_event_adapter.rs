@@ -64,6 +64,7 @@ use futures::{
 };
 use futures_util::TryStreamExt;
 use iter_tools::Itertools;
+use semver::Version;
 use std::{
     collections::BTreeMap,
     iter,
@@ -124,10 +125,19 @@ impl Fetcher for GraphqlFetcher {
         &self,
     ) -> anyhow::Result<BoxStream<TransactionReceipts>> {
         let (tx, rx) = broadcast::channel(self.event_capacity.into());
-        let client_clone = self.client.clone();
+        let client_clone: Arc<FuelClient> = self.client.clone();
 
         tokio::spawn(async move {
             tracing::info!("Subscribing to preconfirmation events");
+
+            let version = match client_clone.node_info().await {
+                Ok(info) => Version::parse(&info.node_version).expect("Invalid semver"),
+                Err(err) => {
+                    tracing::error!("Failed to fetch node info: {err:?}");
+                    return;
+                }
+            };
+            let handle_index_bug = version.minor <= 47;
 
             let result = client_clone.preconfirmations_subscription().await;
             let mut subscription = match result {
@@ -143,7 +153,7 @@ impl Fetcher for GraphqlFetcher {
                             "Failed to subscribe to preconfirmation events: {err:?}"
                         );
                     }
-                    return
+                    return;
                 }
             };
 
@@ -158,13 +168,19 @@ impl Fetcher for GraphqlFetcher {
                                     continue;
                                 };
 
+                                let index = if handle_index_bug {
+                                    tx_pointer.tx_index().saturating_sub(1)
+                                } else {
+                                    tx_pointer.tx_index()
+                                };
+
                                 // `fuel-core` has a bug where pre confirmations use incorrect tx pointer
-                                let corrected_tx_pointer = TxPointer::new(tx_pointer.block_height(), tx_pointer.tx_index().saturating_sub(1));
+                                let corrected_tx_pointer = TxPointer::new(tx_pointer.block_height(), index);
                                 let event = TransactionReceipts {
                                     tx_pointer: corrected_tx_pointer,
                                     tx_id: transaction_id,
                                     receipts: Arc::new(receipts),
-                                    execution_status: ExecutionStatus::Failure { reason }
+                                    execution_status: ExecutionStatus::Failure { reason },
                                 };
 
                                 if tx.send(event).is_err() {
@@ -178,8 +194,14 @@ impl Fetcher for GraphqlFetcher {
                                     continue;
                                 };
 
+                                let index = if handle_index_bug {
+                                    tx_pointer.tx_index().saturating_sub(1)
+                                } else {
+                                    tx_pointer.tx_index()
+                                };
+
                                 // `fuel-core` has a bug where pre confirmations use incorrect tx pointer
-                                let corrected_tx_pointer = TxPointer::new(tx_pointer.block_height(), tx_pointer.tx_index().saturating_sub(1));
+                                let corrected_tx_pointer = TxPointer::new(tx_pointer.block_height(), index);
                                 let event = TransactionReceipts {
                                     tx_pointer: corrected_tx_pointer,
                                     tx_id: transaction_id,
@@ -272,7 +294,7 @@ impl Fetcher for GraphqlFetcher {
                             "Failed to subscribe to preconfirmation events: {err:?}"
                         );
                     }
-                    return
+                    return;
                 }
             };
 

@@ -46,6 +46,7 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-stream = { version = "0.1", features = ["full"] }
 tracing = { workspace = true }
 url = { workspace = true }
+semver = "1"
 
 [build-dependencies]
 fuel-core-client = { workspace = true }

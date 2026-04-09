@@ -22,7 +22,7 @@ use fuel_core_types::fuel_types::BlockHeight;
     strum_macros::EnumCount,
     strum_macros::IntoStaticStr,
     strum_macros::EnumString,
-    strum_macros::EnumVariantNames,
+    strum_macros::VariantNames,
     PartialEq,
     Eq,
     enum_iterator::Sequence,
