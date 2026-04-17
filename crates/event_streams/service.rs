@@ -67,6 +67,16 @@ impl Config {
             pending_blocks_limit: 10_000,
         }
     }
+
+    /// Configures dedicated GraphQL endpoints used exclusively for
+    /// preconfirmation and finalized-block subscriptions. First-arrival
+    /// semantics: the first source to deliver events for a given block
+    /// height becomes authoritative for that height. When empty,
+    /// subscriptions fall back to `fuel_graphql_urls`.
+    pub fn with_subscription_sources(mut self, subscription_sources: Vec<Url>) -> Self {
+        self.subscription_sources = subscription_sources;
+        self
+    }
 }
 
 #[derive(Clone)]
