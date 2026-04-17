@@ -37,6 +37,7 @@ use futures::{
         select_all,
     },
 };
+use rand::Rng;
 use std::{
     num::NonZeroUsize,
     ops::RangeInclusive,
@@ -44,7 +45,10 @@ use std::{
         Arc,
         Mutex,
     },
-    time::Duration,
+    time::{
+        Duration,
+        Instant,
+    },
 };
 use url::Url;
 
@@ -109,16 +113,60 @@ impl MultiSourceFetcher {
     }
 }
 
-/// Delay between subscription reconnect attempts when a per-source stream
-/// ends or fails to establish.
-const RECONNECT_DELAY: Duration = Duration::from_secs(1);
+/// Policy controlling how aggressively a per-source subscription retries
+/// after it ends or fails to establish. The goal is to keep failed sources
+/// reconnecting in the background without hammering them: each consecutive
+/// failure doubles the delay up to `max`, and the delay resets to `base`
+/// only after a connection has been stably delivering items for at least
+/// `stability_threshold`. ±20% jitter is applied so multiple indexer
+/// instances don't synchronize their reconnects.
+#[derive(Clone, Copy, Debug)]
+pub struct BackoffPolicy {
+    pub base: Duration,
+    pub max: Duration,
+    pub stability_threshold: Duration,
+}
+
+impl Default for BackoffPolicy {
+    fn default() -> Self {
+        Self {
+            base: Duration::from_secs(1),
+            max: Duration::from_secs(60),
+            stability_threshold: Duration::from_secs(30),
+        }
+    }
+}
+
+/// Computes the next backoff given the previous value and what happened on
+/// the just-ended connection attempt. Resets to `base` only when the prior
+/// connection was stable (delivered items for at least `stability_threshold`).
+fn next_backoff(
+    prev: Duration,
+    items_delivered: u64,
+    connection_lifetime: Duration,
+    policy: BackoffPolicy,
+) -> Duration {
+    if items_delivered > 0 && connection_lifetime >= policy.stability_threshold {
+        policy.base
+    } else {
+        let doubled = prev.saturating_mul(2);
+        doubled.min(policy.max)
+    }
+}
+
+fn jitter(delay: Duration) -> Duration {
+    // Multiplicative jitter in [0.8, 1.2].
+    let factor = rand::thread_rng().gen_range(0.8f64..1.2f64);
+    let nanos = (delay.as_nanos() as f64 * factor) as u64;
+    Duration::from_nanos(nanos)
+}
 
 /// Builds a self-reconnecting per-source stream: when the inner subscription
-/// ends (connection drop, transport error), the source sleeps briefly and
-/// tries again, transparently emitting items from the new subscription. The
-/// merged fan-in stream stays alive on whichever sources are currently up;
-/// sources that are down keep retrying in the background and rejoin the fan-in
-/// once they reconnect.
+/// ends (connection drop, transport error), the source sleeps with
+/// exponential backoff + jitter and tries again, transparently emitting items
+/// from the new subscription. The merged fan-in stream stays alive on
+/// whichever sources are currently up; sources that are down keep retrying
+/// politely in the background and rejoin the fan-in once they reconnect.
 fn reconnecting_source_stream<Fetcher, T, F>(
     fetcher: Fetcher,
     source: SourceId,
@@ -130,38 +178,113 @@ where
     T: Send + Sync + 'static,
     F: Fn(&Fetcher) -> anyhow::Result<BoxStream<T>> + Send + Sync + 'static,
 {
-    let subscribe = Arc::new(subscribe);
-    let is_first = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    reconnecting_source_stream_with_policy(
+        fetcher,
+        source,
+        kind,
+        subscribe,
+        BackoffPolicy::default(),
+    )
+}
 
-    stream::repeat(())
-        .then(move |()| {
-            let fetcher = fetcher.clone();
-            let subscribe = subscribe.clone();
-            let is_first = is_first.clone();
-            async move {
-                let first = is_first.swap(false, std::sync::atomic::Ordering::SeqCst);
-                if !first {
+fn reconnecting_source_stream_with_policy<Fetcher, T, F>(
+    fetcher: Fetcher,
+    source: SourceId,
+    kind: &'static str,
+    subscribe: F,
+    policy: BackoffPolicy,
+) -> BoxStream<(SourceId, T)>
+where
+    Fetcher: Clone + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    F: Fn(&Fetcher) -> anyhow::Result<BoxStream<T>> + Send + Sync + 'static,
+{
+    struct State<Fetcher, T, F> {
+        fetcher: Fetcher,
+        subscribe: Arc<F>,
+        source: SourceId,
+        kind: &'static str,
+        is_first: bool,
+        backoff: Duration,
+        inner: Option<BoxStream<T>>,
+        connection_start: Option<Instant>,
+        items_on_current: u64,
+        policy: BackoffPolicy,
+    }
+
+    let state = State::<Fetcher, T, F> {
+        fetcher,
+        subscribe: Arc::new(subscribe),
+        source,
+        kind,
+        is_first: true,
+        backoff: policy.base,
+        inner: None,
+        connection_start: None,
+        items_on_current: 0,
+        policy,
+    };
+
+    stream::unfold(state, |mut s| async move {
+        loop {
+            if s.inner.is_none() {
+                if !s.is_first {
+                    let delay = jitter(s.backoff);
                     tracing::info!(
-                        "{kind} subscription from {source} ended; reconnecting \
-                         in {RECONNECT_DELAY:?}"
+                        "{} subscription from {} reconnecting in {:?}",
+                        s.kind,
+                        s.source,
+                        delay
                     );
-                    tokio::time::sleep(RECONNECT_DELAY).await;
+                    tokio::time::sleep(delay).await;
                 }
-                match subscribe(&fetcher) {
-                    Ok(stream) => stream,
+                s.is_first = false;
+                match (s.subscribe)(&s.fetcher) {
+                    Ok(stream) => {
+                        s.inner = Some(stream);
+                        s.connection_start = Some(Instant::now());
+                        s.items_on_current = 0;
+                    }
                     Err(err) => {
                         tracing::warn!(
-                            "{kind} subscription from {source} failed to \
-                             establish: {err:?}; will retry"
+                            "{} subscription from {} failed to establish: \
+                             {err:?}; will retry",
+                            s.kind,
+                            s.source
                         );
-                        stream::empty().into_boxed()
+                        s.backoff = next_backoff(s.backoff, 0, Duration::ZERO, s.policy);
+                        continue;
                     }
                 }
             }
-        })
-        .flatten()
-        .map(move |item| (source, item))
-        .into_boxed()
+
+            let inner = s.inner.as_mut().expect("inner set above");
+            match inner.next().await {
+                Some(item) => {
+                    s.items_on_current += 1;
+                    return Some(((s.source, item), s));
+                }
+                None => {
+                    let lifetime = s
+                        .connection_start
+                        .take()
+                        .map(|t| t.elapsed())
+                        .unwrap_or_default();
+                    let items = s.items_on_current;
+                    s.inner = None;
+                    s.backoff = next_backoff(s.backoff, items, lifetime, s.policy);
+                    tracing::info!(
+                        "{} subscription from {} ended after {items} items \
+                         in {lifetime:?}; next backoff {:?}",
+                        s.kind,
+                        s.source,
+                        s.backoff,
+                    );
+                }
+            }
+        }
+    })
+    .into_boxed()
 }
 
 impl Fetcher for MultiSourceFetcher {
@@ -319,6 +442,58 @@ mod tests {
         }
     }
 
+    fn fast_policy() -> BackoffPolicy {
+        // Short delays so reconnect-path tests don't sleep for real seconds.
+        BackoffPolicy {
+            base: Duration::from_millis(10),
+            max: Duration::from_millis(80),
+            stability_threshold: Duration::from_millis(500),
+        }
+    }
+
+    #[test]
+    fn next_backoff_doubles_on_failure_until_cap() {
+        let policy = BackoffPolicy {
+            base: Duration::from_millis(10),
+            max: Duration::from_millis(40),
+            stability_threshold: Duration::from_secs(30),
+        };
+        // Failure: 0 items, near-zero lifetime → double, capped at max.
+        let b0 = policy.base;
+        let b1 = next_backoff(b0, 0, Duration::ZERO, policy);
+        let b2 = next_backoff(b1, 0, Duration::ZERO, policy);
+        let b3 = next_backoff(b2, 0, Duration::ZERO, policy);
+        let b4 = next_backoff(b3, 0, Duration::ZERO, policy);
+        assert_eq!(b1, Duration::from_millis(20));
+        assert_eq!(b2, Duration::from_millis(40));
+        assert_eq!(b3, Duration::from_millis(40)); // capped
+        assert_eq!(b4, Duration::from_millis(40)); // stays at cap
+    }
+
+    #[test]
+    fn next_backoff_resets_only_after_stable_connection() {
+        let policy = BackoffPolicy {
+            base: Duration::from_millis(10),
+            max: Duration::from_secs(1),
+            stability_threshold: Duration::from_millis(500),
+        };
+        let elevated = Duration::from_millis(160);
+
+        // Short-lived connection with items: does NOT reset (server likely
+        // accepting then kicking us — treat as failure).
+        let after_short = next_backoff(elevated, 5, Duration::from_millis(100), policy);
+        assert_eq!(after_short, Duration::from_millis(320));
+
+        // Stable connection (≥ threshold) with items: resets to base.
+        let after_stable = next_backoff(elevated, 5, Duration::from_millis(500), policy);
+        assert_eq!(after_stable, policy.base);
+
+        // Stable-duration connection with zero items: not stable (no data),
+        // treat as failure.
+        let after_empty = next_backoff(elevated, 0, Duration::from_secs(10), policy);
+        assert_eq!(after_empty, Duration::from_millis(320));
+    }
+
     #[tokio::test]
     async fn reconnecting_source_retries_after_stream_end() {
         // First subscription delivers 1 item then ends; second delivers more.
@@ -328,11 +503,12 @@ mod tests {
         });
         let calls_handle = fetcher.calls.clone();
 
-        let stream = reconnecting_source_stream(
+        let stream = reconnecting_source_stream_with_policy(
             fetcher,
             SourceId(0),
             "test",
             |f: &MockFetcher| f.subscribe(),
+            fast_policy(),
         );
 
         let collected: Vec<_> = stream.take(4).collect().await;
@@ -359,11 +535,12 @@ mod tests {
             }
         });
 
-        let stream = reconnecting_source_stream(
+        let stream = reconnecting_source_stream_with_policy(
             fetcher,
             SourceId(7),
             "test",
             |f: &MockFetcher| f.subscribe(),
+            fast_policy(),
         );
 
         let collected: Vec<_> = stream.take(1).collect().await;
@@ -380,15 +557,19 @@ mod tests {
             Ok(stream::iter(vec![base, base + 1, base + 2]).into_boxed())
         });
 
-        let s0 =
-            reconnecting_source_stream(broken, SourceId(0), "test", |f: &MockFetcher| {
-                f.subscribe()
-            });
-        let s1 = reconnecting_source_stream(
+        let s0 = reconnecting_source_stream_with_policy(
+            broken,
+            SourceId(0),
+            "test",
+            |f: &MockFetcher| f.subscribe(),
+            fast_policy(),
+        );
+        let s1 = reconnecting_source_stream_with_policy(
             healthy,
             SourceId(1),
             "test",
             |f: &MockFetcher| f.subscribe(),
+            fast_policy(),
         );
 
         let merged = select_all(vec![s0, s1]);
@@ -417,15 +598,19 @@ mod tests {
         });
         let healthy = MockFetcher::new(|_| Ok(stream::iter(0u32..10_000).into_boxed()));
 
-        let s0 =
-            reconnecting_source_stream(flaky, SourceId(0), "test", |f: &MockFetcher| {
-                f.subscribe()
-            });
-        let s1 = reconnecting_source_stream(
+        let s0 = reconnecting_source_stream_with_policy(
+            flaky,
+            SourceId(0),
+            "test",
+            |f: &MockFetcher| f.subscribe(),
+            fast_policy(),
+        );
+        let s1 = reconnecting_source_stream_with_policy(
             healthy,
             SourceId(1),
             "test",
             |f: &MockFetcher| f.subscribe(),
+            fast_policy(),
         );
 
         let mut merged = select_all(vec![s0, s1]);
@@ -453,5 +638,46 @@ mod tests {
             from_s0 >= 1,
             "recovered source 0 must rejoin the merge; got {collected:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn repeated_failures_space_out_retries() {
+        // Source always fails. With a 10ms base that doubles, five failed
+        // attempts should take at least base + 2*base + 4*base + 8*base
+        // (ignoring the first, which doesn't sleep) = 150ms minus jitter.
+        // We measure wall time between attempt-start events via call count.
+        let fetcher = MockFetcher::new(|_| Err(anyhow::anyhow!("down")));
+        let calls = fetcher.calls.clone();
+
+        let stream = reconnecting_source_stream_with_policy(
+            fetcher,
+            SourceId(0),
+            "test",
+            |f: &MockFetcher| f.subscribe(),
+            fast_policy(),
+        );
+
+        // Drive the stream for a bounded time; we never get an item, so
+        // rely on the timeout to stop polling.
+        let start = Instant::now();
+        let _ = tokio::time::timeout(
+            Duration::from_millis(200),
+            stream.take(1).collect::<Vec<_>>(),
+        )
+        .await;
+        let elapsed = start.elapsed();
+        let attempts = calls.load(Ordering::SeqCst);
+
+        // Without backoff (fixed 10ms), 200ms would produce ~20 attempts.
+        // With exponential growth to cap=80ms and ±20% jitter, a healthy
+        // upper bound is ~15. Assert we're well below the no-backoff rate.
+        assert!(
+            attempts <= 15,
+            "expected exponential backoff to limit attempts; got {attempts} \
+             in {elapsed:?}"
+        );
+        // And we do retry more than once (backoff kicks in only after
+        // the first sleep).
+        assert!(attempts >= 2, "expected at least one retry; got {attempts}");
     }
 }
