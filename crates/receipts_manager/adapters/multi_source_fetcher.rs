@@ -44,6 +44,7 @@ use std::{
         Arc,
         Mutex,
     },
+    time::Duration,
 };
 use url::Url;
 
@@ -108,65 +109,59 @@ impl MultiSourceFetcher {
     }
 }
 
-/// Tagged item from a per-source stream. `Ended` is emitted when a source's
-/// underlying subscription terminates (the GraphQL stream yielded `None`, which
-/// happens on connection/transport error); it lets the merged stream short-
-/// circuit so the service rebuilds every source instead of silently running
-/// with one dead endpoint.
-enum SourceEvent<T> {
-    Item(SourceId, T),
-    Ended(SourceId),
-}
+/// Delay between subscription reconnect attempts when a per-source stream
+/// ends or fails to establish.
+const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
-fn tagged_preconfs(
-    fetcher: &GraphqlFetcher,
+/// Builds a self-reconnecting per-source stream: when the inner subscription
+/// ends (connection drop, transport error), the source sleeps briefly and
+/// tries again, transparently emitting items from the new subscription. The
+/// merged fan-in stream stays alive on whichever sources are currently up;
+/// sources that are down keep retrying in the background and rejoin the fan-in
+/// once they reconnect.
+fn reconnecting_source_stream<Fetcher, T, F>(
+    fetcher: Fetcher,
     source: SourceId,
-) -> anyhow::Result<BoxStream<SourceEvent<TransactionReceipts>>> {
-    let stream = fetcher
-        .predicted_receipts_stream()?
-        .map(move |r| SourceEvent::Item(source, r))
-        .chain(stream::once(async move { SourceEvent::Ended(source) }));
-    Ok(stream.into_boxed())
-}
-
-fn tagged_blocks(
-    fetcher: &GraphqlFetcher,
-    source: SourceId,
-) -> anyhow::Result<BoxStream<SourceEvent<FinalizedBlock>>> {
-    let stream = fetcher
-        .finalized_blocks_stream()?
-        .map(move |b| SourceEvent::Item(source, b))
-        .chain(stream::once(async move { SourceEvent::Ended(source) }));
-    Ok(stream.into_boxed())
-}
-
-/// Stops the merged stream on the first `Ended` sentinel, logging which source
-/// died. `select_all` only ends when every child ends, so without this one
-/// broken source would be silently masked by the others.
-fn stop_on_first_end<T: Send + 'static>(
-    merged: impl Stream<Item = SourceEvent<T>> + Send + 'static,
     kind: &'static str,
-) -> impl Stream<Item = (SourceId, T)> + Send + 'static {
-    merged
-        .take_while(move |e| {
-            let cont = match e {
-                SourceEvent::Ended(source) => {
-                    tracing::warn!(
-                        "{kind} subscription from {source} ended; tearing down \
-                         merged stream to trigger reconnect of all sources"
+    subscribe: F,
+) -> BoxStream<(SourceId, T)>
+where
+    Fetcher: Clone + Send + Sync + 'static,
+    T: Send + Sync + 'static,
+    F: Fn(&Fetcher) -> anyhow::Result<BoxStream<T>> + Send + Sync + 'static,
+{
+    let subscribe = Arc::new(subscribe);
+    let is_first = Arc::new(std::sync::atomic::AtomicBool::new(true));
+
+    stream::repeat(())
+        .then(move |()| {
+            let fetcher = fetcher.clone();
+            let subscribe = subscribe.clone();
+            let is_first = is_first.clone();
+            async move {
+                let first = is_first.swap(false, std::sync::atomic::Ordering::SeqCst);
+                if !first {
+                    tracing::info!(
+                        "{kind} subscription from {source} ended; reconnecting \
+                         in {RECONNECT_DELAY:?}"
                     );
-                    false
+                    tokio::time::sleep(RECONNECT_DELAY).await;
                 }
-                SourceEvent::Item(..) => true,
-            };
-            async move { cont }
-        })
-        .filter_map(|e| async move {
-            match e {
-                SourceEvent::Item(source, item) => Some((source, item)),
-                SourceEvent::Ended(_) => None,
+                match subscribe(&fetcher) {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        tracing::warn!(
+                            "{kind} subscription from {source} failed to \
+                             establish: {err:?}; will retry"
+                        );
+                        stream::empty().into_boxed()
+                    }
+                }
             }
         })
+        .flatten()
+        .map(move |item| (source, item))
+        .into_boxed()
 }
 
 impl Fetcher for MultiSourceFetcher {
@@ -181,10 +176,17 @@ impl Fetcher for MultiSourceFetcher {
             .sources
             .iter()
             .enumerate()
-            .map(|(i, f)| tagged_preconfs(f, SourceId(i)))
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .map(|(i, f)| {
+                reconnecting_source_stream(
+                    f.clone(),
+                    SourceId(i),
+                    "preconfirmation",
+                    |f: &GraphqlFetcher| f.predicted_receipts_stream(),
+                )
+            })
+            .collect::<Vec<_>>();
 
-        let merged = stop_on_first_end(select_all(tagged), "preconfirmation");
+        let merged = select_all(tagged);
         let router = self.router.clone();
 
         let filtered = merged.filter_map(move |(source, event)| {
@@ -222,10 +224,17 @@ impl Fetcher for MultiSourceFetcher {
             .sources
             .iter()
             .enumerate()
-            .map(|(i, f)| tagged_blocks(f, SourceId(i)))
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .map(|(i, f)| {
+                reconnecting_source_stream(
+                    f.clone(),
+                    SourceId(i),
+                    "finalized block",
+                    |f: &GraphqlFetcher| f.finalized_blocks_stream(),
+                )
+            })
+            .collect::<Vec<_>>();
 
-        let merged = stop_on_first_end(select_all(tagged), "finalized block");
+        let merged = select_all(tagged);
         let router = self.router.clone();
 
         let filtered = merged.filter_map(move |(source, block)| {
@@ -281,112 +290,168 @@ impl Fetcher for MultiSourceFetcher {
 mod tests {
     use super::*;
     use futures::stream;
+    use std::sync::atomic::{
+        AtomicUsize,
+        Ordering,
+    };
 
-    fn tagged<T: Send + Sync + 'static>(
-        source: SourceId,
-        items: Vec<T>,
-    ) -> BoxStream<SourceEvent<T>> {
-        stream::iter(items)
-            .map(move |v| SourceEvent::Item(source, v))
-            .chain(stream::once(async move { SourceEvent::Ended(source) }))
-            .into_boxed()
+    #[derive(Clone)]
+    struct MockFetcher {
+        calls: Arc<AtomicUsize>,
+        #[allow(clippy::type_complexity)]
+        factory: Arc<dyn Fn(usize) -> anyhow::Result<BoxStream<u32>> + Send + Sync>,
     }
 
-    #[tokio::test]
-    async fn merged_stream_ends_when_any_source_ends() {
-        // s0 ends after 2 items; s1 has 100 items still to deliver. The merged
-        // stream must terminate as soon as s0's Ended sentinel arrives, even
-        // though s1 is still live — this forces the service to rebuild both.
-        let s0 = tagged(SourceId(0), vec![10u32, 11]);
-        let s1 = tagged(SourceId(1), (0..100).collect::<Vec<u32>>());
-
-        let merged = stop_on_first_end(select_all(vec![s0, s1]), "test");
-        let collected: Vec<_> = merged.collect().await;
-
-        // s0 contributes exactly 2 items before its sentinel terminates the
-        // merge; s1 may contribute some items that were interleaved before
-        // the sentinel, but far fewer than its full 100.
-        let from_s0 = collected.iter().filter(|(s, _)| *s == SourceId(0)).count();
-        assert_eq!(from_s0, 2);
-        assert!(
-            collected.len() < 100,
-            "merged stream should terminate before s1 drains; got {} items",
-            collected.len()
-        );
-    }
-
-    #[tokio::test]
-    async fn service_rebuild_loop_recovers_after_source_dies() {
-        // Simulates the service's rebuild path (service.rs: on stream `None`,
-        // call `fetcher.predicted_receipts_stream()` again). Factory call 0
-        // returns a merge where s0 dies after 1 item; factory call 1 returns
-        // a healthy merge. The loop must:
-        //   1. exhaust the first stream (stop_on_first_end kicks in),
-        //   2. invoke the factory again,
-        //   3. drain the fresh stream successfully.
-        use std::sync::{
-            Arc,
-            atomic::{
-                AtomicUsize,
-                Ordering,
-            },
-        };
-
-        let calls = Arc::new(AtomicUsize::new(0));
-        let calls_for_factory = calls.clone();
-        let factory = move || {
-            let n = calls_for_factory.fetch_add(1, Ordering::SeqCst);
-            let streams = if n == 0 {
-                // First build: source 0 dies after 1 item; source 1 would
-                // happily deliver 1000 more but must be torn down.
-                vec![
-                    tagged(SourceId(0), vec![1u32]),
-                    tagged(SourceId(1), (100..1100).collect::<Vec<u32>>()),
-                ]
-            } else {
-                // Rebuild: fresh source delivers its full batch before ending.
-                vec![tagged(SourceId(0), vec![10u32, 11, 12])]
-            };
-            stop_on_first_end(select_all(streams), "test").into_boxed()
-        };
-
-        // Iteration 1: drain until the merged stream ends (s0 sentinel fires).
-        let mut stream = factory();
-        let mut drained_first: Vec<(SourceId, u32)> = Vec::new();
-        while let Some(item) = stream.next().await {
-            drained_first.push(item);
+    impl MockFetcher {
+        fn new<F>(factory: F) -> Self
+        where
+            F: Fn(usize) -> anyhow::Result<BoxStream<u32>> + Send + Sync + 'static,
+        {
+            Self {
+                calls: Arc::new(AtomicUsize::new(0)),
+                factory: Arc::new(factory),
+            }
         }
-        assert!(
-            drained_first.len() < 1001,
-            "first stream must terminate before s1 drains; got {} items",
-            drained_first.len()
-        );
 
-        // Iteration 2: rebuild. Verify the factory was called again and the
-        // new stream delivers items.
-        let stream = factory();
-        let drained_second: Vec<_> = stream.collect().await;
-
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            2,
-            "factory must be re-invoked"
-        );
-        assert_eq!(
-            drained_second,
-            vec![(SourceId(0), 10), (SourceId(0), 11), (SourceId(0), 12),]
-        );
+        fn subscribe(&self) -> anyhow::Result<BoxStream<u32>> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst);
+            (self.factory)(n)
+        }
     }
 
     #[tokio::test]
-    async fn merged_stream_delivers_items_until_end() {
-        // Single source, finite: every item is delivered, then the stream ends.
-        let s0 = tagged(SourceId(0), vec![1u32, 2, 3]);
-        let merged = stop_on_first_end(select_all(vec![s0]), "test");
-        let collected: Vec<_> = merged.collect().await;
+    async fn reconnecting_source_retries_after_stream_end() {
+        // First subscription delivers 1 item then ends; second delivers more.
+        let fetcher = MockFetcher::new(|n| {
+            let items: Vec<u32> = if n == 0 { vec![1] } else { vec![2, 3, 4] };
+            Ok(stream::iter(items).into_boxed())
+        });
+        let calls_handle = fetcher.calls.clone();
+
+        let stream = reconnecting_source_stream(
+            fetcher,
+            SourceId(0),
+            "test",
+            |f: &MockFetcher| f.subscribe(),
+        );
+
+        let collected: Vec<_> = stream.take(4).collect().await;
         assert_eq!(
             collected,
-            vec![(SourceId(0), 1), (SourceId(0), 2), (SourceId(0), 3),]
+            vec![
+                (SourceId(0), 1),
+                (SourceId(0), 2),
+                (SourceId(0), 3),
+                (SourceId(0), 4),
+            ]
+        );
+        assert!(calls_handle.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[tokio::test]
+    async fn reconnecting_source_retries_after_subscribe_error() {
+        // First subscribe fails; second succeeds. The helper must not give up.
+        let fetcher = MockFetcher::new(|n| {
+            if n == 0 {
+                Err(anyhow::anyhow!("transient"))
+            } else {
+                Ok(stream::iter(vec![42u32]).into_boxed())
+            }
+        });
+
+        let stream = reconnecting_source_stream(
+            fetcher,
+            SourceId(7),
+            "test",
+            |f: &MockFetcher| f.subscribe(),
+        );
+
+        let collected: Vec<_> = stream.take(1).collect().await;
+        assert_eq!(collected, vec![(SourceId(7), 42)]);
+    }
+
+    #[tokio::test]
+    async fn healthy_source_keeps_flowing_while_other_reconnects() {
+        // Source 0 is always-failing; source 1 is healthy. select_all over
+        // both must keep delivering from source 1 regardless of source 0.
+        let broken = MockFetcher::new(|_| Err(anyhow::anyhow!("always down")));
+        let healthy = MockFetcher::new(|n| {
+            let base = (n as u32) * 100;
+            Ok(stream::iter(vec![base, base + 1, base + 2]).into_boxed())
+        });
+
+        let s0 =
+            reconnecting_source_stream(broken, SourceId(0), "test", |f: &MockFetcher| {
+                f.subscribe()
+            });
+        let s1 = reconnecting_source_stream(
+            healthy,
+            SourceId(1),
+            "test",
+            |f: &MockFetcher| f.subscribe(),
+        );
+
+        let merged = select_all(vec![s0, s1]);
+        let collected: Vec<_> = merged.take(6).collect().await;
+
+        assert!(collected.iter().all(|(s, _)| *s == SourceId(1)));
+        assert_eq!(collected.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn recovered_source_rejoins_merge() {
+        // Source 0 is broken on the first subscribe attempt; subsequent attempts
+        // succeed. Source 1 is always healthy. After the reconnect delay fires,
+        // source 0's items must appear alongside source 1's in the merged
+        // output — proving a recovered source rejoins the fan-in.
+        let flaky = MockFetcher::new(|n| {
+            if n == 0 {
+                Err(anyhow::anyhow!("down on first attempt"))
+            } else {
+                // On the second+ attempt, emit an item then hold the stream
+                // open so select_all keeps polling it.
+                Ok(stream::iter(vec![999u32])
+                    .chain(stream::pending())
+                    .into_boxed())
+            }
+        });
+        let healthy = MockFetcher::new(|_| Ok(stream::iter(0u32..10_000).into_boxed()));
+
+        let s0 =
+            reconnecting_source_stream(flaky, SourceId(0), "test", |f: &MockFetcher| {
+                f.subscribe()
+            });
+        let s1 = reconnecting_source_stream(
+            healthy,
+            SourceId(1),
+            "test",
+            |f: &MockFetcher| f.subscribe(),
+        );
+
+        let mut merged = select_all(vec![s0, s1]);
+        let mut collected: Vec<(SourceId, u32)> = Vec::new();
+        let collect = async {
+            while let Some(item) = merged.next().await {
+                let is_s0 = item.0 == SourceId(0);
+                collected.push(item);
+                if is_s0 {
+                    break;
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), collect)
+            .await
+            .expect("recovered source must rejoin within timeout");
+
+        let from_s1 = collected.iter().filter(|(s, _)| *s == SourceId(1)).count();
+        let from_s0 = collected.iter().filter(|(s, _)| *s == SourceId(0)).count();
+        assert!(
+            from_s1 > 0,
+            "healthy source 1 must keep flowing while source 0 reconnects"
+        );
+        assert!(
+            from_s0 >= 1,
+            "recovered source 0 must rejoin the merge; got {collected:?}"
         );
     }
 }
