@@ -277,3 +277,138 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     assert!(matches!(event.receipts[3], Receipt::Return { .. }));
     assert!(matches!(event.receipts[4], Receipt::ScriptResult { .. }));
 }
+
+mod rebuild_on_stream_end {
+    use super::*;
+    use crate::port::{
+        Fetcher,
+        FinalizedBlock,
+    };
+    use fuel_core_services::stream::{
+        BoxStream,
+        IntoBoxStream,
+    };
+    use fuel_core_types::fuel_types::BlockHeight;
+    use fuel_indexer_types::events::TransactionReceipts;
+    use futures::{
+        Stream,
+        stream,
+    };
+    use std::sync::{
+        Mutex,
+        atomic::{
+            AtomicUsize,
+            Ordering,
+        },
+    };
+
+    /// Mock fetcher whose preconf stream ends immediately on the first call
+    /// (simulating one source dying and our `stop_on_first_end` tearing down
+    /// the merged stream). Subsequent calls return a pending stream so the
+    /// service observes a successful rebuild.
+    #[derive(Default)]
+    struct CountingFetcher {
+        preconf_calls: AtomicUsize,
+        block_calls: AtomicUsize,
+        notify_rebuilt: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    }
+
+    impl Fetcher for CountingFetcher {
+        fn predicted_receipts_stream(
+            &self,
+        ) -> anyhow::Result<BoxStream<TransactionReceipts>> {
+            let n = self.preconf_calls.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                // First call: empty stream — yields None immediately,
+                // forcing the service down its rebuild branch.
+                Ok(stream::empty().into_boxed())
+            } else {
+                // Rebuild: signal the test and then park forever so
+                // `task.run()` returns Continue without further churn.
+                if let Some(tx) =
+                    self.notify_rebuilt.lock().expect("notify poisoned").take()
+                {
+                    let _ = tx.send(());
+                }
+                Ok(stream::pending().into_boxed())
+            }
+        }
+
+        fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>> {
+            self.block_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(stream::pending().into_boxed())
+        }
+
+        fn finalized_blocks_for_range(
+            &self,
+            _range: std::ops::RangeInclusive<u32>,
+        ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> + Send + 'static {
+            stream::empty()
+        }
+
+        async fn last_height(&self) -> anyhow::Result<BlockHeight> {
+            Ok(0u32.into())
+        }
+    }
+
+    #[tokio::test]
+    async fn service_rebuilds_preconf_stream_after_it_ends() {
+        let storage = InMemoryStorage::<Column>::default();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        let fetcher = Arc::new(CountingFetcher::default());
+        *fetcher.notify_rebuilt.lock().unwrap() = Some(tx);
+
+        // The Fetcher trait is implemented on CountingFetcher; the service
+        // takes F by value, so wrap it in a trivial newtype that forwards.
+        struct ArcFetcher(Arc<CountingFetcher>);
+        impl Fetcher for ArcFetcher {
+            fn predicted_receipts_stream(
+                &self,
+            ) -> anyhow::Result<BoxStream<TransactionReceipts>> {
+                self.0.predicted_receipts_stream()
+            }
+            fn finalized_blocks_stream(
+                &self,
+            ) -> anyhow::Result<BoxStream<FinalizedBlock>> {
+                self.0.finalized_blocks_stream()
+            }
+            fn finalized_blocks_for_range(
+                &self,
+                range: std::ops::RangeInclusive<u32>,
+            ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> + Send + 'static
+            {
+                self.0.finalized_blocks_for_range(range)
+            }
+            async fn last_height(&self) -> anyhow::Result<BlockHeight> {
+                self.0.last_height().await
+            }
+        }
+
+        let service = UninitializedService::new(
+            0u32.into(),
+            true,
+            storage,
+            ArcFetcher(fetcher.clone()),
+        )
+        .unwrap();
+        let mut task = service
+            .into_task(&StateWatcher::started(), ())
+            .await
+            .expect("into_task");
+
+        // into_task builds the initial (dying) preconf stream → call #1.
+        assert_eq!(fetcher.preconf_calls.load(Ordering::SeqCst), 1);
+
+        // One run tick: the empty stream yields None, the service rebuilds.
+        let action = task.run(&mut StateWatcher::started()).await;
+        assert!(matches!(action, TaskNextAction::Continue));
+
+        // Rebuild happened: second call is observed, and the notify signal fires.
+        tokio::time::timeout(std::time::Duration::from_secs(1), rx)
+            .await
+            .expect("rebuild never happened")
+            .expect("rebuild channel dropped");
+        assert_eq!(fetcher.preconf_calls.load(Ordering::SeqCst), 2);
+    }
+}

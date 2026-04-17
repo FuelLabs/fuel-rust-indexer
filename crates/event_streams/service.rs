@@ -1,5 +1,4 @@
 use crate::adapters::StreamsAdapter;
-use fuel_core_client::client::FuelClient;
 use fuel_core_services::{
     RunnableService,
     RunnableTask,
@@ -16,13 +15,13 @@ use fuel_events_manager::service::{
     UnstableEvent,
 };
 use fuel_receipts_manager::adapters::{
-    ReceiptGraphqlManager,
-    graphql_event_adapter,
+    ReceiptMultiSourceManager,
+    multi_source_fetcher::{
+        MultiSourceFetcher,
+        MultiSourceFetcherConfig,
+    },
 };
-use std::{
-    num::NonZeroUsize,
-    sync::Arc,
-};
+use std::num::NonZeroUsize;
 use url::Url;
 
 #[cfg(feature = "rocksdb")]
@@ -37,6 +36,12 @@ pub struct Config {
     /// List of Fuel GraphQL URLs for failover support.
     /// The FuelClient will automatically switch to the next URL if one fails.
     pub fuel_graphql_urls: Vec<Url>,
+    /// Dedicated GraphQL endpoints used exclusively for preconfirmation and
+    /// finalized-block subscriptions. Each entry is an independent source; the
+    /// first source to deliver events for a given block height becomes
+    /// authoritative for that height. When empty, subscriptions fall back to
+    /// `fuel_graphql_urls`.
+    pub subscription_sources: Vec<Url>,
     pub heartbeat_capacity: NonZeroUsize,
     pub event_capacity: NonZeroUsize,
     pub blocks_request_batch_size: usize,
@@ -54,6 +59,7 @@ impl Config {
             starting_block_height,
             use_preconfirmations,
             fuel_graphql_urls: urls,
+            subscription_sources: Vec::new(),
             heartbeat_capacity: NonZeroUsize::new(1000).expect("Is not zero; qed"),
             event_capacity: NonZeroUsize::new(10000).expect("Is not zero; qed"),
             blocks_request_batch_size: 10,
@@ -75,7 +81,7 @@ where
     RS: fuel_receipts_manager::port::Storage,
     ES: fuel_events_manager::port::Storage,
 {
-    receipts_manager: ReceiptGraphqlManager<RS>,
+    receipts_manager: ReceiptMultiSourceManager<RS>,
     events_manager: EventManager<Processor, ES, StreamsAdapter<RS>>,
 }
 
@@ -202,6 +208,7 @@ where
         starting_block_height,
         use_preconfirmations,
         fuel_graphql_urls,
+        subscription_sources,
         heartbeat_capacity,
         event_capacity,
         blocks_request_batch_size,
@@ -209,18 +216,15 @@ where
         pending_blocks_limit,
     } = config;
 
-    let client = Arc::new(FuelClient::with_urls(&fuel_graphql_urls)?);
-
-    let graphql_event_adapter_config = graphql_event_adapter::GraphqlEventAdapterConfig {
-        client,
+    let fetcher = MultiSourceFetcher::new(MultiSourceFetcherConfig {
+        main_urls: fuel_graphql_urls,
+        subscription_sources,
         heartbeat_capacity,
         event_capacity,
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
-    };
-    let fetcher =
-        graphql_event_adapter::create_graphql_event_adapter(graphql_event_adapter_config);
+    })?;
 
     let receipts_manager = fuel_receipts_manager::service::new_service(
         starting_block_height,
