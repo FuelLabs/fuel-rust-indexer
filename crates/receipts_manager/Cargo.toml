@@ -40,6 +40,7 @@ futures-core = "0.3.31"
 futures-util = "0.3.31"
 iter_tools = "0.39.0"
 pin-project-lite = "0.2.16"
+rand = "0.8.2"
 strum = { workspace = true }
 strum_macros = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
@@ -55,4 +56,3 @@ fuel-core-client = { workspace = true }
 fuel-core = { workspace = true, features = ["test-helpers"] }
 fuel-core-chain-config = { workspace = true, features = ["test-helpers"] }
 fuel-core-services = { workspace = true, features = ["test-helpers"] }
-rand = "0.8.2"

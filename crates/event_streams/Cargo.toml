@@ -26,7 +26,6 @@ test-helpers = ["rocksdb", "fuel-receipts-manager/test-helpers", "fuel-events-ma
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 fuel-core = { workspace = true, optional = true }
-fuel-core-client = { workspace = true }
 fuel-core-services = { workspace = true }
 fuel-core-types = { workspace = true }
 fuel-events-manager = { workspace = true }
