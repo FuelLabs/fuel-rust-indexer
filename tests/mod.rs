@@ -3,3 +3,5 @@
 
 #[cfg(test)]
 pub mod logs_indexer;
+#[cfg(test)]
+pub mod rpc_sync;

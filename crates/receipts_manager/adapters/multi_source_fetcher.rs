@@ -22,6 +22,12 @@ use crate::{
         FinalizedBlock,
     },
 };
+#[cfg(feature = "rpc")]
+use crate::adapters::rpc_event_adapter::{
+    RpcEventAdapterConfig,
+    RpcFetcher,
+    create_rpc_event_adapter,
+};
 use fuel_core_client::client::FuelClient;
 use fuel_core_services::stream::{
     BoxStream,
@@ -52,13 +58,27 @@ use std::{
 };
 use url::Url;
 
-/// Number of recent sealed heights whose block id is retained to detect
-/// cross-source mismatches.
+/// Generic over the per-source [`Fetcher`] implementation (GraphQL or RPC).
+/// Both `main` and `sources` use the same fetcher type — mixing GraphQL and
+/// RPC sources in one [`MultiSourceFetcher`] is not supported.
 #[derive(Clone)]
-pub struct MultiSourceFetcher {
-    main: GraphqlFetcher,
-    sources: Vec<GraphqlFetcher>,
+pub struct MultiSourceFetcher<F = GraphqlFetcher> {
+    main: F,
+    sources: Vec<F>,
     router: Arc<Mutex<RouterState>>,
+}
+
+impl<F> MultiSourceFetcher<F> {
+    /// Build directly from pre-constructed fetchers. Lets callers wire any
+    /// `Fetcher` implementation without going through the GraphQL- or
+    /// RPC-specific URL builders.
+    pub fn from_fetchers(main: F, sources: Vec<F>) -> Self {
+        Self {
+            main,
+            sources,
+            router: Arc::new(Mutex::new(RouterState::new())),
+        }
+    }
 }
 
 pub struct MultiSourceFetcherConfig {
@@ -71,7 +91,35 @@ pub struct MultiSourceFetcherConfig {
     pub pending_blocks_limit: usize,
 }
 
-impl MultiSourceFetcher {
+#[cfg(feature = "rpc")]
+pub struct MultiSourceRpcConfig {
+    /// GraphQL URLs that back the main client. Preconfirmation subscriptions
+    /// still go through GraphQL; block fetching and the new-block stream go
+    /// over RPC.
+    pub main_graphql_urls: Vec<Url>,
+    /// RPC (protobuf) URL paired with `main_graphql_urls`.
+    pub main_rpc_url: Url,
+    /// Each subscription source: one GraphQL URL paired with one RPC URL.
+    pub subscription_sources: Vec<RpcSource>,
+    pub heartbeat_capacity: NonZeroUsize,
+    pub event_capacity: NonZeroUsize,
+    /// Size of each parallel `get_block_range` window during backfill.
+    pub blocks_request_batch_size: usize,
+    /// Number of in-flight `get_block_range` chunks during backfill.
+    pub blocks_request_concurrency: usize,
+    /// How far ahead the fan-out may run before the consumer drains; protects
+    /// memory when consumers are slower than the network.
+    pub pending_blocks_limit: usize,
+}
+
+#[cfg(feature = "rpc")]
+#[derive(Debug, Clone)]
+pub struct RpcSource {
+    pub graphql_url: Url,
+    pub rpc_url: Url,
+}
+
+impl MultiSourceFetcher<GraphqlFetcher> {
     pub fn new(config: MultiSourceFetcherConfig) -> anyhow::Result<Self> {
         let MultiSourceFetcherConfig {
             main_urls,
@@ -104,6 +152,72 @@ impl MultiSourceFetcher {
                 Ok::<_, anyhow::Error>(build(client))
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
+
+        Ok(Self {
+            main,
+            sources,
+            router: Arc::new(Mutex::new(RouterState::new())),
+        })
+    }
+}
+
+#[cfg(feature = "rpc")]
+impl MultiSourceFetcher<RpcFetcher> {
+    pub async fn new_rpc(config: MultiSourceRpcConfig) -> anyhow::Result<Self> {
+        let MultiSourceRpcConfig {
+            main_graphql_urls,
+            main_rpc_url,
+            subscription_sources,
+            heartbeat_capacity,
+            event_capacity,
+            blocks_request_batch_size,
+            blocks_request_concurrency,
+            pending_blocks_limit,
+        } = config;
+
+        let main_client = Arc::new(
+            FuelClient::new_with_rpc(
+                main_graphql_urls.iter().map(Url::as_str),
+                main_rpc_url.as_str(),
+            )
+            .await?,
+        );
+
+        let chain_id = main_client
+            .chain_info()
+            .await?
+            .consensus_parameters
+            .chain_id();
+
+        let build = |client: Arc<FuelClient>| -> RpcFetcher {
+            create_rpc_event_adapter(RpcEventAdapterConfig {
+                client,
+                chain_id,
+                heartbeat_capacity,
+                event_capacity,
+                blocks_request_batch_size,
+                blocks_request_concurrency,
+                pending_blocks_limit,
+            })
+        };
+
+        let main = build(main_client);
+
+        let mut sources = Vec::with_capacity(subscription_sources.len());
+        for RpcSource {
+            graphql_url,
+            rpc_url,
+        } in subscription_sources
+        {
+            let client = Arc::new(
+                FuelClient::new_with_rpc(
+                    std::iter::once(graphql_url.as_str()),
+                    rpc_url.as_str(),
+                )
+                .await?,
+            );
+            sources.push(build(client));
+        }
 
         Ok(Self {
             main,
@@ -287,7 +401,10 @@ where
     .into_boxed()
 }
 
-impl Fetcher for MultiSourceFetcher {
+impl<F> Fetcher for MultiSourceFetcher<F>
+where
+    F: Fetcher + Clone,
+{
     fn predicted_receipts_stream(
         &self,
     ) -> anyhow::Result<BoxStream<TransactionReceipts>> {
@@ -304,7 +421,7 @@ impl Fetcher for MultiSourceFetcher {
                     f.clone(),
                     SourceId(i),
                     "preconfirmation",
-                    |f: &GraphqlFetcher| f.predicted_receipts_stream(),
+                    |f: &F| f.predicted_receipts_stream(),
                 )
             })
             .collect::<Vec<_>>();
@@ -352,7 +469,7 @@ impl Fetcher for MultiSourceFetcher {
                     f.clone(),
                     SourceId(i),
                     "finalized block",
-                    |f: &GraphqlFetcher| f.finalized_blocks_stream(),
+                    |f: &F| f.finalized_blocks_stream(),
                 )
             })
             .collect::<Vec<_>>();

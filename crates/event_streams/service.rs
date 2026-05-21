@@ -14,12 +14,23 @@ use fuel_events_manager::service::{
     TransactionEvents,
     UnstableEvent,
 };
-use fuel_receipts_manager::adapters::{
-    ReceiptMultiSourceManager,
-    multi_source_fetcher::{
-        MultiSourceFetcher,
-        MultiSourceFetcherConfig,
+use fuel_receipts_manager::{
+    adapters::{
+        graphql_event_adapter::GraphqlFetcher,
+        multi_source_fetcher::{
+            MultiSourceFetcher,
+            MultiSourceFetcherConfig,
+        },
     },
+    service::ReceiptsManager,
+};
+#[cfg(feature = "rpc")]
+use fuel_receipts_manager::adapters::{
+    multi_source_fetcher::{
+        MultiSourceRpcConfig,
+        RpcSource,
+    },
+    rpc_event_adapter::RpcFetcher,
 };
 use std::num::NonZeroUsize;
 use url::Url;
@@ -62,7 +73,7 @@ impl Config {
             subscription_sources: Vec::new(),
             heartbeat_capacity: NonZeroUsize::new(1000).expect("Is not zero; qed"),
             event_capacity: NonZeroUsize::new(10000).expect("Is not zero; qed"),
-            blocks_request_batch_size: 10,
+            blocks_request_batch_size: 1,
             blocks_request_concurrency: 100,
             pending_blocks_limit: 10_000,
         }
@@ -85,22 +96,32 @@ pub struct SharedState<Event, ES, RS> {
     receipts: fuel_receipts_manager::service::SharedState<RS>,
 }
 
-pub struct Task<Processor, ES, RS>
-where
+pub struct Task<
+    Processor,
+    ES,
+    RS,
+    F = MultiSourceFetcher<GraphqlFetcher>,
+> where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
     ES: fuel_events_manager::port::Storage,
+    F: fuel_receipts_manager::port::Fetcher,
 {
-    receipts_manager: ReceiptMultiSourceManager<RS>,
+    receipts_manager: ReceiptsManager<RS, F>,
     events_manager: EventManager<Processor, ES, StreamsAdapter<RS>>,
 }
 
+#[cfg(feature = "rpc")]
+pub type RpcTask<Processor, ES, RS> =
+    Task<Processor, ES, RS, MultiSourceFetcher<RpcFetcher>>;
+
 #[async_trait::async_trait]
-impl<Processor, RS, ES> RunnableService for Task<Processor, ES, RS>
+impl<Processor, RS, ES, F> RunnableService for Task<Processor, ES, RS, F>
 where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
     ES: fuel_events_manager::port::Storage,
+    F: fuel_receipts_manager::port::Fetcher,
 {
     const NAME: &'static str = "StreamsService";
     type SharedData = SharedState<Processor::Event, ES, RS>;
@@ -129,11 +150,12 @@ where
     }
 }
 
-impl<Processor, RS, ES> RunnableTask for Task<Processor, ES, RS>
+impl<Processor, RS, ES, F> RunnableTask for Task<Processor, ES, RS, F>
 where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
     ES: fuel_events_manager::port::Storage,
+    F: fuel_receipts_manager::port::Fetcher,
 {
     async fn run(&mut self, watcher: &mut StateWatcher) -> TaskNextAction {
         tokio::select! {
@@ -258,6 +280,116 @@ where
     Ok(ServiceRunner::new(task))
 }
 
+#[cfg(feature = "rpc")]
+pub struct RpcConfig {
+    pub starting_block_height: BlockHeight,
+    pub use_preconfirmations: bool,
+    /// GraphQL URLs that back the main client. Preconfirmation subscriptions
+    /// and chain-info lookups still go through GraphQL.
+    pub fuel_graphql_urls: Vec<Url>,
+    /// Protobuf RPC URL paired with `fuel_graphql_urls`. Blocks (backfill +
+    /// realtime) are fetched here.
+    pub fuel_rpc_url: Url,
+    /// Each subscription source pairs a GraphQL URL (preconfs) with an RPC
+    /// URL (block stream / range).
+    pub subscription_sources: Vec<RpcSource>,
+    pub heartbeat_capacity: NonZeroUsize,
+    pub event_capacity: NonZeroUsize,
+    pub blocks_request_batch_size: usize,
+    pub blocks_request_concurrency: usize,
+    pub pending_blocks_limit: usize,
+}
+
+#[cfg(feature = "rpc")]
+impl RpcConfig {
+    pub fn new(
+        starting_block_height: BlockHeight,
+        use_preconfirmations: bool,
+        fuel_graphql_urls: Vec<Url>,
+        fuel_rpc_url: Url,
+    ) -> Self {
+        Self {
+            starting_block_height,
+            use_preconfirmations,
+            fuel_graphql_urls,
+            fuel_rpc_url,
+            subscription_sources: Vec::new(),
+            heartbeat_capacity: NonZeroUsize::new(1000).expect("Is not zero; qed"),
+            event_capacity: NonZeroUsize::new(10000).expect("Is not zero; qed"),
+            blocks_request_batch_size: 1,
+            blocks_request_concurrency: 100,
+            pending_blocks_limit: 10_000,
+        }
+    }
+
+    pub fn with_subscription_sources(
+        mut self,
+        subscription_sources: Vec<RpcSource>,
+    ) -> Self {
+        self.subscription_sources = subscription_sources;
+        self
+    }
+}
+
+#[cfg(feature = "rpc")]
+pub async fn new_rpc_service<Processor, ES, RS>(
+    config: RpcConfig,
+    processor: Processor,
+    receipts_storage: RS,
+    events_storage: ES,
+) -> anyhow::Result<ServiceRunner<RpcTask<Processor, ES, RS>>>
+where
+    Processor: fuel_events_manager::port::ReceiptsProcessor,
+    RS: fuel_receipts_manager::port::Storage,
+    ES: fuel_events_manager::port::Storage,
+{
+    let RpcConfig {
+        starting_block_height,
+        use_preconfirmations,
+        fuel_graphql_urls,
+        fuel_rpc_url,
+        subscription_sources,
+        heartbeat_capacity,
+        event_capacity,
+        blocks_request_batch_size,
+        blocks_request_concurrency,
+        pending_blocks_limit,
+    } = config;
+
+    let fetcher = MultiSourceFetcher::new_rpc(MultiSourceRpcConfig {
+        main_graphql_urls: fuel_graphql_urls,
+        main_rpc_url: fuel_rpc_url,
+        subscription_sources,
+        heartbeat_capacity,
+        event_capacity,
+        blocks_request_batch_size,
+        blocks_request_concurrency,
+        pending_blocks_limit,
+    })
+    .await?;
+
+    let receipts_manager = fuel_receipts_manager::service::new_service(
+        starting_block_height,
+        use_preconfirmations,
+        receipts_storage,
+        fetcher,
+    )?;
+
+    let events_manager = fuel_events_manager::service::new_service(
+        processor,
+        starting_block_height,
+        events_storage,
+        StreamsAdapter::new(receipts_manager.shared.clone()),
+    )?;
+
+    let task: RpcTask<Processor, ES, RS> = Task {
+        receipts_manager,
+        events_manager,
+    };
+
+    Ok(ServiceRunner::new(task))
+}
+
 #[cfg(feature = "rocksdb")]
 mod rocksdb {
     use super::*;
@@ -314,5 +446,51 @@ mod rocksdb {
             receipts_storage,
             events_storage,
         )
+    }
+
+    #[cfg(feature = "rpc")]
+    pub type RpcLogsStreamsService<Fn> = ServiceRunner<
+        RpcTask<
+            SimplerProcessorAdapter<FnReceiptParser<Fn>>,
+            fuel_events_manager::rocksdb::Storage,
+            fuel_receipts_manager::rocksdb::Storage,
+        >,
+    >;
+
+    #[cfg(feature = "rpc")]
+    pub async fn new_rpc_logs_streams<Fn, Event>(
+        parser: Fn,
+        path: PathBuf,
+        state_rewind_policy: StateRewindPolicy,
+        database_config: DatabaseConfig,
+        config: RpcConfig,
+    ) -> anyhow::Result<RpcLogsStreamsService<Fn>>
+    where
+        Event: fuel_events_manager::port::StorableEvent,
+        Fn: FnOnce(DecoderConfig, &Receipt) -> Option<Event>
+            + Copy
+            + Send
+            + Sync
+            + 'static,
+    {
+        let parser = FnReceiptParser::new(parser, DecoderConfig::default());
+
+        let receipts_storage = fuel_receipts_manager::rocksdb::open_database(
+            path.as_path(),
+            state_rewind_policy,
+            database_config,
+        )?;
+        let events_storage = fuel_events_manager::rocksdb::open_database(
+            path.as_path(),
+            state_rewind_policy,
+            database_config,
+        )?;
+        new_rpc_service(
+            config,
+            SimplerProcessorAdapter::new(parser),
+            receipts_storage,
+            events_storage,
+        )
+        .await
     }
 }
