@@ -535,7 +535,14 @@ impl Fetcher for GraphqlFetcher {
             Some(Ok(block))
         });
 
-        let (sender, receiver) = mpsc::unbounded_channel();
+        // Bounded — same reasoning as the RPC adapter: an unbounded channel
+        // here grows without limit whenever the downstream consumer stalls
+        // (rocksdb compaction, slow broadcast subscriber, etc.) because
+        // `controller.set_latest_height` advances on every successful send
+        // and releases more chunks. Bounding to `pending_blocks_limit`
+        // applies backpressure all the way back to the GraphQL fetcher.
+        let (sender, receiver) =
+            mpsc::channel::<anyhow::Result<FinalizedBlock>>(self.pending_blocks_limit);
 
         tokio::spawn(async move {
             let unordered_stream = unordered_stream;
@@ -550,7 +557,7 @@ impl Fetcher for GraphqlFetcher {
                         ready_blocks.insert(*block.header.height(), block);
                     }
                     Err(err) => {
-                        let _ = sender.send(Err(err));
+                        let _ = sender.send(Err(err)).await;
                         break;
                     }
                 }
@@ -558,7 +565,7 @@ impl Fetcher for GraphqlFetcher {
                 while let Some(entry) = ready_blocks.first_entry() {
                     if **entry.key() == *remaining_range.start() {
                         let block = entry.remove();
-                        if sender.send(Ok(block)).is_err() {
+                        if sender.send(Ok(block)).await.is_err() {
                             return;
                         }
                         remaining_range = (remaining_range.start().saturating_add(1))
@@ -572,7 +579,7 @@ impl Fetcher for GraphqlFetcher {
             }
         });
 
-        tokio_stream::wrappers::UnboundedReceiverStream::new(receiver)
+        tokio_stream::wrappers::ReceiverStream::new(receiver)
     }
 
     async fn last_height(&self) -> anyhow::Result<BlockHeight> {

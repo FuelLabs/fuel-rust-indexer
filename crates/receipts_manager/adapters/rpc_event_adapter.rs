@@ -355,7 +355,15 @@ impl Fetcher for RpcFetcher {
             controller.clone(),
         );
 
-        let (sender, receiver) = mpsc::unbounded_channel();
+        // Bounded so a slow downstream consumer applies backpressure all the
+        // way to the fetch chunks: when this channel fills, the spawn awaits
+        // on `send`, `remaining_range.start()` stops advancing, the
+        // `PendingBlocksController` stops releasing new chunks, and S3 GETs
+        // stop being issued. Without the bound the channel grows unboundedly
+        // under any downstream stall (rocksdb compaction, lagging broadcast
+        // subscriber, retry storms upstream, …) and we'd OOM in production.
+        let (sender, receiver) =
+            mpsc::channel::<anyhow::Result<FinalizedBlock>>(self.pending_blocks_limit);
 
         tokio::spawn(async move {
             pin_mut!(unordered);
@@ -368,7 +376,7 @@ impl Fetcher for RpcFetcher {
                         ready.insert(*block.header.height(), block);
                     }
                     Err(err) => {
-                        let _ = sender.send(Err(err));
+                        let _ = sender.send(Err(err)).await;
                         break;
                     }
                 }
@@ -376,7 +384,7 @@ impl Fetcher for RpcFetcher {
                 while let Some(entry) = ready.first_entry() {
                     if **entry.key() == *remaining_range.start() {
                         let block = entry.remove();
-                        if sender.send(Ok(block)).is_err() {
+                        if sender.send(Ok(block)).await.is_err() {
                             return;
                         }
                         remaining_range = (remaining_range.start().saturating_add(1))
@@ -390,7 +398,7 @@ impl Fetcher for RpcFetcher {
             }
         });
 
-        tokio_stream::wrappers::UnboundedReceiverStream::new(receiver)
+        tokio_stream::wrappers::ReceiverStream::new(receiver)
     }
 
     async fn last_height(&self) -> anyhow::Result<BlockHeight> {
