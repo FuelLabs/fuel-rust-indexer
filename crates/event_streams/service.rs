@@ -14,6 +14,14 @@ use fuel_events_manager::service::{
     TransactionEvents,
     UnstableEvent,
 };
+#[cfg(feature = "rpc")]
+use fuel_receipts_manager::adapters::{
+    multi_source_fetcher::{
+        MultiSourceRpcConfig,
+        RpcSource,
+    },
+    rpc_event_adapter::RpcFetcher,
+};
 use fuel_receipts_manager::{
     adapters::{
         graphql_event_adapter::GraphqlFetcher,
@@ -23,14 +31,6 @@ use fuel_receipts_manager::{
         },
     },
     service::ReceiptsManager,
-};
-#[cfg(feature = "rpc")]
-use fuel_receipts_manager::adapters::{
-    multi_source_fetcher::{
-        MultiSourceRpcConfig,
-        RpcSource,
-    },
-    rpc_event_adapter::RpcFetcher,
 };
 use std::num::NonZeroUsize;
 use url::Url;
@@ -96,12 +96,8 @@ pub struct SharedState<Event, ES, RS> {
     receipts: fuel_receipts_manager::service::SharedState<RS>,
 }
 
-pub struct Task<
-    Processor,
-    ES,
-    RS,
-    F = MultiSourceFetcher<GraphqlFetcher>,
-> where
+pub struct Task<Processor, ES, RS, F = MultiSourceFetcher<GraphqlFetcher>>
+where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
     ES: fuel_events_manager::port::Storage,

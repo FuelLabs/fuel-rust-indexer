@@ -144,17 +144,18 @@ where
         pending_blocks_limit,
     } = config;
 
-    let fetcher = MultiSourceFetcher::new_rpc(multi_source_fetcher::MultiSourceRpcConfig {
-        main_graphql_urls: fuel_graphql_urls,
-        main_rpc_url: fuel_rpc_url,
-        subscription_sources,
-        heartbeat_capacity,
-        event_capacity,
-        blocks_request_batch_size,
-        blocks_request_concurrency,
-        pending_blocks_limit,
-    })
-    .await?;
+    let fetcher =
+        MultiSourceFetcher::new_rpc(multi_source_fetcher::MultiSourceRpcConfig {
+            main_graphql_urls: fuel_graphql_urls,
+            main_rpc_url: fuel_rpc_url,
+            subscription_sources,
+            heartbeat_capacity,
+            event_capacity,
+            blocks_request_batch_size,
+            blocks_request_concurrency,
+            pending_blocks_limit,
+        })
+        .await?;
 
     let event_manager = crate::service::new_service(
         starting_block_height,

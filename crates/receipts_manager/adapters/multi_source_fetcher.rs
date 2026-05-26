@@ -3,6 +3,12 @@
 //! [`RouterState`] so each height is served from the first source that reports
 //! it.
 
+#[cfg(feature = "rpc")]
+use crate::adapters::rpc_event_adapter::{
+    RpcEventAdapterConfig,
+    RpcFetcher,
+    create_rpc_event_adapter,
+};
 use crate::{
     adapters::{
         graphql_event_adapter::{
@@ -21,12 +27,6 @@ use crate::{
         Fetcher,
         FinalizedBlock,
     },
-};
-#[cfg(feature = "rpc")]
-use crate::adapters::rpc_event_adapter::{
-    RpcEventAdapterConfig,
-    RpcFetcher,
-    create_rpc_event_adapter,
 };
 use fuel_core_client::client::FuelClient;
 use fuel_core_services::stream::{

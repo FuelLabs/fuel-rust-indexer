@@ -613,9 +613,7 @@ pub fn blocks_for_batched_rpc(
 async fn fetch_chunk(
     client: &FuelClient,
     range: Range<u32>,
-) -> anyhow::Result<
-    Vec<(fuel_core_types::blockchain::block::Block, Vec<Vec<Receipt>>)>,
-> {
+) -> anyhow::Result<Vec<(fuel_core_types::blockchain::block::Block, Vec<Vec<Receipt>>)>> {
     if range.is_empty() {
         return Ok(vec![]);
     }
