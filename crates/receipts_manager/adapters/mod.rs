@@ -11,6 +11,8 @@ pub mod client_ext;
 pub mod concurrent_stream;
 pub mod concurrent_unordered_stream;
 pub mod graphql_event_adapter;
+#[cfg(feature = "rpc")]
+pub mod hybrid_fetcher;
 pub mod multi_source_fetcher;
 pub mod resizable_buffered;
 pub mod resizable_buffered_unordered;
@@ -39,6 +41,9 @@ where
 pub struct ManagerConfig {
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are unavailable).
+    pub pull_block_interval: std::time::Duration,
     /// List of Fuel GraphQL URLs for failover support.
     /// The FuelClient will automatically switch to the next URL if one fails.
     pub fuel_graphql_urls: Vec<Url>,
@@ -63,7 +68,7 @@ pub type ReceiptMultiSourceManager<Database> =
 
 #[cfg(feature = "rpc")]
 pub type ReceiptRpcMultiSourceManager<Database> =
-    ReceiptsManager<Database, MultiSourceFetcher<rpc_event_adapter::RpcFetcher>>;
+    ReceiptsManager<Database, MultiSourceFetcher<hybrid_fetcher::HybridFetcher>>;
 
 pub fn new_graphql_service<S>(
     config: ManagerConfig,
@@ -75,6 +80,7 @@ where
     let ManagerConfig {
         starting_block_height,
         use_preconfirmations,
+        pull_block_interval,
         fuel_graphql_urls,
         subscription_sources,
         heartbeat_capacity,
@@ -92,6 +98,7 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        pull_block_interval,
     })?;
 
     let event_manager = crate::service::new_service(
@@ -108,10 +115,12 @@ where
 pub struct RpcManagerConfig {
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
-    /// GraphQL URLs backing the main client (used for preconfirmation
-    /// subscriptions and chain-info lookups).
+    /// GraphQL URLs backing the main client (preconfirmation subscriptions,
+    /// realtime blocks, chain-info lookups, and the synchronized tail of
+    /// block synchronization).
     pub fuel_graphql_urls: Vec<Url>,
-    /// RPC (protobuf) URL paired with `fuel_graphql_urls`.
+    /// RPC (protobuf) URL paired with `fuel_graphql_urls`, used for bulk
+    /// block synchronization only.
     pub fuel_rpc_url: Url,
     /// Additional subscription sources, each pairing a GraphQL URL (preconfs)
     /// with an RPC URL (block stream / range).
@@ -121,6 +130,12 @@ pub struct RpcManagerConfig {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// Number of blocks below the GraphQL tip that are always synced via
+    /// GraphQL instead of RPC. See [`hybrid_fetcher::HybridFetcher`].
+    pub sync_tail_blocks: u32,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are unavailable).
+    pub pull_block_interval: std::time::Duration,
 }
 
 #[cfg(feature = "rpc")]
@@ -142,19 +157,24 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        sync_tail_blocks,
+        pull_block_interval,
     } = config;
 
-    let fetcher = MultiSourceFetcher::new_rpc(multi_source_fetcher::MultiSourceRpcConfig {
-        main_graphql_urls: fuel_graphql_urls,
-        main_rpc_url: fuel_rpc_url,
-        subscription_sources,
-        heartbeat_capacity,
-        event_capacity,
-        blocks_request_batch_size,
-        blocks_request_concurrency,
-        pending_blocks_limit,
-    })
-    .await?;
+    let fetcher =
+        MultiSourceFetcher::new_hybrid(multi_source_fetcher::MultiSourceRpcConfig {
+            main_graphql_urls: fuel_graphql_urls,
+            main_rpc_url: fuel_rpc_url,
+            subscription_sources,
+            heartbeat_capacity,
+            event_capacity,
+            blocks_request_batch_size,
+            blocks_request_concurrency,
+            pending_blocks_limit,
+            sync_tail_blocks,
+            pull_block_interval,
+        })
+        .await?;
 
     let event_manager = crate::service::new_service(
         starting_block_height,

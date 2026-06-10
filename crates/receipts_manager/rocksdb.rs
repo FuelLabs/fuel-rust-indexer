@@ -47,9 +47,7 @@ impl fuel_storage_utils::rocksdb::CheckpointReader for Description {
     /// pending change-set. That table is keyed by `()` and holds the
     /// block height the commit represents.
     fn read_checkpoint(
-        iter: &fuel_core_storage::iter::changes_iterator::ChangesIterator<
-            Self::Column,
-        >,
+        iter: &fuel_core_storage::iter::changes_iterator::ChangesIterator<Self::Column>,
     ) -> fuel_core_storage::Result<Option<Self::Height>> {
         StructuredStorage::new(iter)
             .storage::<LastCheckpoint>()

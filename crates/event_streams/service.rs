@@ -14,6 +14,14 @@ use fuel_events_manager::service::{
     TransactionEvents,
     UnstableEvent,
 };
+#[cfg(feature = "rpc")]
+use fuel_receipts_manager::adapters::{
+    hybrid_fetcher::HybridFetcher,
+    multi_source_fetcher::{
+        MultiSourceRpcConfig,
+        RpcSource,
+    },
+};
 use fuel_receipts_manager::{
     adapters::{
         graphql_event_adapter::GraphqlFetcher,
@@ -24,16 +32,14 @@ use fuel_receipts_manager::{
     },
     service::ReceiptsManager,
 };
-#[cfg(feature = "rpc")]
-use fuel_receipts_manager::adapters::{
-    multi_source_fetcher::{
-        MultiSourceRpcConfig,
-        RpcSource,
-    },
-    rpc_event_adapter::RpcFetcher,
-};
 use std::num::NonZeroUsize;
 use url::Url;
+
+pub use fuel_receipts_manager::adapters::graphql_event_adapter::DEFAULT_PULL_BLOCK_INTERVAL;
+/// Re-exported defaults so service consumers can fill config struct
+/// literals without reaching into `fuel_receipts_manager` internals.
+#[cfg(feature = "rpc")]
+pub use fuel_receipts_manager::adapters::hybrid_fetcher::DEFAULT_SYNC_TAIL_BLOCKS;
 
 #[cfg(feature = "rocksdb")]
 pub use rocksdb::*;
@@ -58,6 +64,9 @@ pub struct Config {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are unavailable on the node).
+    pub pull_block_interval: std::time::Duration,
 }
 
 impl Config {
@@ -76,6 +85,7 @@ impl Config {
             blocks_request_batch_size: 1,
             blocks_request_concurrency: 100,
             pending_blocks_limit: 10_000,
+            pull_block_interval: DEFAULT_PULL_BLOCK_INTERVAL,
         }
     }
 
@@ -96,12 +106,8 @@ pub struct SharedState<Event, ES, RS> {
     receipts: fuel_receipts_manager::service::SharedState<RS>,
 }
 
-pub struct Task<
-    Processor,
-    ES,
-    RS,
-    F = MultiSourceFetcher<GraphqlFetcher>,
-> where
+pub struct Task<Processor, ES, RS, F = MultiSourceFetcher<GraphqlFetcher>>
+where
     Processor: fuel_events_manager::port::ReceiptsProcessor,
     RS: fuel_receipts_manager::port::Storage,
     ES: fuel_events_manager::port::Storage,
@@ -113,7 +119,7 @@ pub struct Task<
 
 #[cfg(feature = "rpc")]
 pub type RpcTask<Processor, ES, RS> =
-    Task<Processor, ES, RS, MultiSourceFetcher<RpcFetcher>>;
+    Task<Processor, ES, RS, MultiSourceFetcher<HybridFetcher>>;
 
 #[async_trait::async_trait]
 impl<Processor, RS, ES, F> RunnableService for Task<Processor, ES, RS, F>
@@ -246,6 +252,7 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        pull_block_interval,
     } = config;
 
     let fetcher = MultiSourceFetcher::new(MultiSourceFetcherConfig {
@@ -256,6 +263,7 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        pull_block_interval,
     })?;
 
     let receipts_manager = fuel_receipts_manager::service::new_service(
@@ -284,11 +292,13 @@ where
 pub struct RpcConfig {
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
-    /// GraphQL URLs that back the main client. Preconfirmation subscriptions
-    /// and chain-info lookups still go through GraphQL.
+    /// GraphQL URLs that back the main client. Preconfirmation
+    /// subscriptions, the realtime block stream, chain-info lookups, and the
+    /// synchronized tail of block synchronization go through GraphQL.
     pub fuel_graphql_urls: Vec<Url>,
-    /// Protobuf RPC URL paired with `fuel_graphql_urls`. Blocks (backfill +
-    /// realtime) are fetched here.
+    /// Protobuf RPC URL paired with `fuel_graphql_urls`. Used for bulk block
+    /// synchronization only, while the indexer is more than
+    /// `sync_tail_blocks` behind the chain tip.
     pub fuel_rpc_url: Url,
     /// Each subscription source pairs a GraphQL URL (preconfs) with an RPC
     /// URL (block stream / range).
@@ -298,6 +308,12 @@ pub struct RpcConfig {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// Number of blocks below the GraphQL tip that are always synced via
+    /// GraphQL instead of RPC.
+    pub sync_tail_blocks: u32,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are unavailable on the node).
+    pub pull_block_interval: std::time::Duration,
 }
 
 #[cfg(feature = "rpc")]
@@ -319,6 +335,8 @@ impl RpcConfig {
             blocks_request_batch_size: 1,
             blocks_request_concurrency: 100,
             pending_blocks_limit: 10_000,
+            sync_tail_blocks: DEFAULT_SYNC_TAIL_BLOCKS,
+            pull_block_interval: DEFAULT_PULL_BLOCK_INTERVAL,
         }
     }
 
@@ -354,9 +372,11 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        sync_tail_blocks,
+        pull_block_interval,
     } = config;
 
-    let fetcher = MultiSourceFetcher::new_rpc(MultiSourceRpcConfig {
+    let fetcher = MultiSourceFetcher::new_hybrid(MultiSourceRpcConfig {
         main_graphql_urls: fuel_graphql_urls,
         main_rpc_url: fuel_rpc_url,
         subscription_sources,
@@ -365,6 +385,8 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        sync_tail_blocks,
+        pull_block_interval,
     })
     .await?;
 

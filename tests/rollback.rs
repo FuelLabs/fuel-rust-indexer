@@ -61,9 +61,7 @@ use std::{
 
 const N: u32 = 10;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct TestEvent {
     block: u32,
     idx: u32,
