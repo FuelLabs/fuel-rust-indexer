@@ -16,10 +16,7 @@ use fuel_events_manager::service::{
 };
 #[cfg(feature = "rpc")]
 use fuel_receipts_manager::adapters::{
-    hybrid_fetcher::{
-        DEFAULT_SYNC_TAIL_BLOCKS,
-        HybridFetcher,
-    },
+    hybrid_fetcher::HybridFetcher,
     multi_source_fetcher::{
         MultiSourceRpcConfig,
         RpcSource,
@@ -27,10 +24,7 @@ use fuel_receipts_manager::adapters::{
 };
 use fuel_receipts_manager::{
     adapters::{
-        graphql_event_adapter::{
-            DEFAULT_PULL_BLOCK_INTERVAL,
-            GraphqlFetcher,
-        },
+        graphql_event_adapter::GraphqlFetcher,
         multi_source_fetcher::{
             MultiSourceFetcher,
             MultiSourceFetcherConfig,
@@ -40,6 +34,12 @@ use fuel_receipts_manager::{
 };
 use std::num::NonZeroUsize;
 use url::Url;
+
+pub use fuel_receipts_manager::adapters::graphql_event_adapter::DEFAULT_PULL_BLOCK_INTERVAL;
+/// Re-exported defaults so service consumers can fill config struct
+/// literals without reaching into `fuel_receipts_manager` internals.
+#[cfg(feature = "rpc")]
+pub use fuel_receipts_manager::adapters::hybrid_fetcher::DEFAULT_SYNC_TAIL_BLOCKS;
 
 #[cfg(feature = "rocksdb")]
 pub use rocksdb::*;

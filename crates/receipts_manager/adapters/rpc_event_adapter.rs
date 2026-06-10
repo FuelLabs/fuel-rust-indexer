@@ -438,13 +438,22 @@ impl RpcFetcher {
         &self,
         interval_duration: Duration,
     ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> {
+        use std::sync::atomic::{
+            AtomicU32,
+            Ordering,
+        };
+
         let last_known_height = match self.last_height().await {
             Ok(height) => *height,
             Err(err) => {
                 return futures::stream::once(async { Err(err) }).left_stream();
             }
         };
-        let last_known_height = Arc::new(tokio::sync::Mutex::new(last_known_height));
+        // Advanced per *delivered* block (not when a range fetch is merely
+        // started), so a range that errors or ends early is re-requested
+        // from the last delivered height on the next tick instead of being
+        // skipped forever.
+        let last_known_height = Arc::new(AtomicU32::new(last_known_height));
 
         let interval = interval_at(Instant::now() + interval_duration, interval_duration);
 
@@ -457,13 +466,22 @@ impl RpcFetcher {
                         Err(err) => return Some(Err(err)),
                     };
 
-                    let mut last_known_height = last_known_height.lock().await;
+                    let last = last_known_height.load(Ordering::Acquire);
 
-                    if current_known_height > *last_known_height {
-                        let stream = self.finalized_blocks_for_range(
-                            (*last_known_height + 1)..=current_known_height,
-                        );
-                        *last_known_height = current_known_height;
+                    if current_known_height > last {
+                        let stream = self
+                            .finalized_blocks_for_range(
+                                last.saturating_add(1)..=current_known_height,
+                            )
+                            .map(move |result| {
+                                if let Ok(block) = &result {
+                                    last_known_height.fetch_max(
+                                        (*block.header.height()).into(),
+                                        Ordering::AcqRel,
+                                    );
+                                }
+                                result
+                            });
                         Some(Ok(stream))
                     } else {
                         None

@@ -23,7 +23,10 @@
 
 use crate::{
     adapters::{
-        graphql_event_adapter::GraphqlFetcher,
+        graphql_event_adapter::{
+            GraphqlFetcher,
+            RangeFetcher,
+        },
         rpc_event_adapter::RpcFetcher,
     },
     port::{
@@ -38,7 +41,10 @@ use futures::{
     Stream,
     StreamExt,
 };
-use std::ops::RangeInclusive;
+use std::{
+    ops::RangeInclusive,
+    sync::Arc,
+};
 
 /// Default number of blocks below the GraphQL chain tip that are always
 /// fetched via GraphQL instead of RPC. Within this distance the indexer is
@@ -134,9 +140,17 @@ impl Fetcher for HybridFetcher {
     }
 
     /// Realtime blocks come from GraphQL: when the indexer is synchronized
-    /// it must not depend on the lagging aggregator.
+    /// it must not depend on the lagging aggregator. The pull-mode fallback
+    /// (used when block subscriptions are disabled on the node) fetches its
+    /// gap ranges through this hybrid's own `finalized_blocks_for_range`, so
+    /// catch-up after a polling stall still goes over RPC when the gap is
+    /// large enough.
     fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>> {
-        self.graphql.finalized_blocks_stream()
+        let hybrid = self.clone();
+        let range_fetcher: RangeFetcher =
+            Arc::new(move |range| hybrid.finalized_blocks_for_range(range).boxed());
+        self.graphql
+            .finalized_blocks_stream_with_ranges(range_fetcher)
     }
 
     fn finalized_blocks_for_range(
