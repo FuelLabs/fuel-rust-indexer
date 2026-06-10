@@ -67,8 +67,13 @@ pub type ReceiptMultiSourceManager<Database> =
     ReceiptsManager<Database, MultiSourceFetcher<graphql_event_adapter::GraphqlFetcher>>;
 
 #[cfg(feature = "rpc")]
-pub type ReceiptRpcMultiSourceManager<Database> =
-    ReceiptsManager<Database, MultiSourceFetcher<hybrid_fetcher::HybridFetcher>>;
+pub type ReceiptRpcMultiSourceManager<Database> = ReceiptsManager<
+    Database,
+    MultiSourceFetcher<
+        hybrid_fetcher::HybridFetcher,
+        graphql_event_adapter::GraphqlFetcher,
+    >,
+>;
 
 pub fn new_graphql_service<S>(
     config: ManagerConfig,
@@ -122,9 +127,9 @@ pub struct RpcManagerConfig {
     /// RPC (protobuf) URL paired with `fuel_graphql_urls`, used for bulk
     /// block synchronization only.
     pub fuel_rpc_url: Url,
-    /// Additional subscription sources, each pairing a GraphQL URL (preconfs)
-    /// with an RPC URL (block stream / range).
-    pub subscription_sources: Vec<multi_source_fetcher::RpcSource>,
+    /// Dedicated GraphQL endpoints used exclusively for preconfirmation and
+    /// realtime-block subscriptions.
+    pub subscription_sources: Vec<Url>,
     pub heartbeat_capacity: NonZeroUsize,
     pub event_capacity: NonZeroUsize,
     pub blocks_request_batch_size: usize,
