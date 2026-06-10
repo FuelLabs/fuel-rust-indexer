@@ -16,11 +16,14 @@ use fuel_events_manager::service::{
 };
 #[cfg(feature = "rpc")]
 use fuel_receipts_manager::adapters::{
+    hybrid_fetcher::{
+        DEFAULT_SYNC_TAIL_BLOCKS,
+        HybridFetcher,
+    },
     multi_source_fetcher::{
         MultiSourceRpcConfig,
         RpcSource,
     },
-    rpc_event_adapter::RpcFetcher,
 };
 use fuel_receipts_manager::{
     adapters::{
@@ -109,7 +112,7 @@ where
 
 #[cfg(feature = "rpc")]
 pub type RpcTask<Processor, ES, RS> =
-    Task<Processor, ES, RS, MultiSourceFetcher<RpcFetcher>>;
+    Task<Processor, ES, RS, MultiSourceFetcher<HybridFetcher>>;
 
 #[async_trait::async_trait]
 impl<Processor, RS, ES, F> RunnableService for Task<Processor, ES, RS, F>
@@ -280,11 +283,13 @@ where
 pub struct RpcConfig {
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
-    /// GraphQL URLs that back the main client. Preconfirmation subscriptions
-    /// and chain-info lookups still go through GraphQL.
+    /// GraphQL URLs that back the main client. Preconfirmation
+    /// subscriptions, the realtime block stream, chain-info lookups, and the
+    /// synchronized tail of block synchronization go through GraphQL.
     pub fuel_graphql_urls: Vec<Url>,
-    /// Protobuf RPC URL paired with `fuel_graphql_urls`. Blocks (backfill +
-    /// realtime) are fetched here.
+    /// Protobuf RPC URL paired with `fuel_graphql_urls`. Used for bulk block
+    /// synchronization only, while the indexer is more than
+    /// `sync_tail_blocks` behind the chain tip.
     pub fuel_rpc_url: Url,
     /// Each subscription source pairs a GraphQL URL (preconfs) with an RPC
     /// URL (block stream / range).
@@ -294,6 +299,9 @@ pub struct RpcConfig {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// Number of blocks below the GraphQL tip that are always synced via
+    /// GraphQL instead of RPC.
+    pub sync_tail_blocks: u32,
 }
 
 #[cfg(feature = "rpc")]
@@ -315,6 +323,7 @@ impl RpcConfig {
             blocks_request_batch_size: 1,
             blocks_request_concurrency: 100,
             pending_blocks_limit: 10_000,
+            sync_tail_blocks: DEFAULT_SYNC_TAIL_BLOCKS,
         }
     }
 
@@ -350,9 +359,10 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        sync_tail_blocks,
     } = config;
 
-    let fetcher = MultiSourceFetcher::new_rpc(MultiSourceRpcConfig {
+    let fetcher = MultiSourceFetcher::new_hybrid(MultiSourceRpcConfig {
         main_graphql_urls: fuel_graphql_urls,
         main_rpc_url: fuel_rpc_url,
         subscription_sources,
@@ -361,6 +371,7 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        sync_tail_blocks,
     })
     .await?;
 
