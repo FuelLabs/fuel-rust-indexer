@@ -91,6 +91,9 @@ pub struct MultiSourceFetcherConfig {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are unavailable).
+    pub pull_block_interval: Duration,
 }
 
 #[cfg(feature = "rpc")]
@@ -116,6 +119,9 @@ pub struct MultiSourceRpcConfig {
     /// GraphQL instead of RPC. See
     /// [`crate::adapters::hybrid_fetcher::HybridFetcher`].
     pub sync_tail_blocks: u32,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are unavailable).
+    pub pull_block_interval: Duration,
 }
 
 #[cfg(feature = "rpc")]
@@ -135,6 +141,7 @@ impl MultiSourceFetcher<GraphqlFetcher> {
             blocks_request_batch_size,
             blocks_request_concurrency,
             pending_blocks_limit,
+            pull_block_interval,
         } = config;
 
         let build = |client: Arc<FuelClient>| -> GraphqlFetcher {
@@ -145,6 +152,7 @@ impl MultiSourceFetcher<GraphqlFetcher> {
                 blocks_request_batch_size,
                 blocks_request_concurrency,
                 pending_blocks_limit,
+                pull_block_interval,
             })
         };
 
@@ -183,6 +191,7 @@ impl MultiSourceFetcher<HybridFetcher> {
             blocks_request_concurrency,
             pending_blocks_limit,
             sync_tail_blocks,
+            pull_block_interval,
         } = config;
 
         let main_client = Arc::new(
@@ -209,6 +218,7 @@ impl MultiSourceFetcher<HybridFetcher> {
                 blocks_request_batch_size,
                 blocks_request_concurrency,
                 pending_blocks_limit,
+                pull_block_interval,
             });
             let rpc = create_rpc_event_adapter(RpcEventAdapterConfig {
                 client,
@@ -218,6 +228,7 @@ impl MultiSourceFetcher<HybridFetcher> {
                 blocks_request_batch_size,
                 blocks_request_concurrency,
                 pending_blocks_limit,
+                pull_block_interval,
             });
             HybridFetcher::new(graphql, rpc, sync_tail_blocks)
         };

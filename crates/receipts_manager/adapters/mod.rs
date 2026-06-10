@@ -41,6 +41,9 @@ where
 pub struct ManagerConfig {
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are unavailable).
+    pub pull_block_interval: std::time::Duration,
     /// List of Fuel GraphQL URLs for failover support.
     /// The FuelClient will automatically switch to the next URL if one fails.
     pub fuel_graphql_urls: Vec<Url>,
@@ -77,6 +80,7 @@ where
     let ManagerConfig {
         starting_block_height,
         use_preconfirmations,
+        pull_block_interval,
         fuel_graphql_urls,
         subscription_sources,
         heartbeat_capacity,
@@ -94,6 +98,7 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        pull_block_interval,
     })?;
 
     let event_manager = crate::service::new_service(
@@ -128,6 +133,9 @@ pub struct RpcManagerConfig {
     /// Number of blocks below the GraphQL tip that are always synced via
     /// GraphQL instead of RPC. See [`hybrid_fetcher::HybridFetcher`].
     pub sync_tail_blocks: u32,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are unavailable).
+    pub pull_block_interval: std::time::Duration,
 }
 
 #[cfg(feature = "rpc")]
@@ -150,6 +158,7 @@ where
         blocks_request_concurrency,
         pending_blocks_limit,
         sync_tail_blocks,
+        pull_block_interval,
     } = config;
 
     let fetcher =
@@ -163,6 +172,7 @@ where
             blocks_request_concurrency,
             pending_blocks_limit,
             sync_tail_blocks,
+            pull_block_interval,
         })
         .await?;
 

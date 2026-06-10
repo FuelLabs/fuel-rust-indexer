@@ -93,6 +93,7 @@ pub struct RpcFetcher {
     blocks_request_batch_size: usize,
     blocks_request_concurrency: usize,
     pending_blocks_limit: usize,
+    pull_block_interval: Duration,
 }
 
 pub struct RpcEventAdapterConfig {
@@ -103,6 +104,9 @@ pub struct RpcEventAdapterConfig {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// Polling interval of the new-block pull fallback (used when the block
+    /// RPC subscription is unavailable).
+    pub pull_block_interval: Duration,
 }
 
 pub fn create_rpc_event_adapter(config: RpcEventAdapterConfig) -> RpcFetcher {
@@ -114,6 +118,7 @@ pub fn create_rpc_event_adapter(config: RpcEventAdapterConfig) -> RpcFetcher {
         blocks_request_batch_size: config.blocks_request_batch_size,
         blocks_request_concurrency: config.blocks_request_concurrency,
         pending_blocks_limit: config.pending_blocks_limit,
+        pull_block_interval: config.pull_block_interval,
     }
 }
 
@@ -265,7 +270,7 @@ impl Fetcher for RpcFetcher {
                         "Block RPC subscription unavailable; falling back to polling."
                     );
                     let stream =
-                        fetcher.pull_block_stream(Duration::from_millis(200)).await;
+                        fetcher.pull_block_stream(fetcher.pull_block_interval).await;
                     pin_mut!(stream);
 
                     while let Some(result) = stream.next().await {

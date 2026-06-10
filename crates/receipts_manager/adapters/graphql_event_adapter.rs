@@ -101,6 +101,10 @@ pub mod tests;
 #[cfg(test)]
 pub mod fuel_core_mock;
 
+/// Default polling interval for the new-block pull fallback, used when the
+/// node has block subscriptions disabled.
+pub const DEFAULT_PULL_BLOCK_INTERVAL: Duration = Duration::from_millis(200);
+
 #[derive(Clone)]
 pub struct GraphqlFetcher {
     client: Arc<FuelClient>,
@@ -109,6 +113,7 @@ pub struct GraphqlFetcher {
     blocks_request_batch_size: usize,
     blocks_request_concurrency: usize,
     pending_blocks_limit: usize,
+    pull_block_interval: Duration,
 }
 
 pub struct GraphqlEventAdapterConfig {
@@ -118,6 +123,9 @@ pub struct GraphqlEventAdapterConfig {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are disabled on the node).
+    pub pull_block_interval: Duration,
 }
 
 impl Fetcher for GraphqlFetcher {
@@ -263,8 +271,8 @@ impl Fetcher for GraphqlFetcher {
                 let tx = tx.clone();
                 async move {
                     tracing::warn!("Block subscriptions are disabled on the Fuel node.");
-                    let stream =
-                        fetcher.pull_block_stream(Duration::from_millis(200)).await;
+                    let interval = fetcher.pull_block_interval;
+                    let stream = fetcher.pull_block_stream(interval).await;
                     pin_mut!(stream);
 
                     while let Some(result) = stream.next().await {
@@ -620,6 +628,7 @@ pub fn create_graphql_event_adapter(config: GraphqlEventAdapterConfig) -> Graphq
         blocks_request_batch_size: config.blocks_request_batch_size,
         blocks_request_concurrency: config.blocks_request_concurrency,
         pending_blocks_limit: config.pending_blocks_limit,
+        pull_block_interval: config.pull_block_interval,
     }
 }
 

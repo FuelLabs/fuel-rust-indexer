@@ -20,6 +20,7 @@ impl ConfigExt for GraphqlEventAdapterConfig {
             blocks_request_batch_size: 10,
             blocks_request_concurrency: 200,
             pending_blocks_limit: 1000000,
+            pull_block_interval: DEFAULT_PULL_BLOCK_INTERVAL,
         }
     }
 
@@ -31,6 +32,7 @@ impl ConfigExt for GraphqlEventAdapterConfig {
             blocks_request_batch_size: 10,
             blocks_request_concurrency: 200,
             pending_blocks_limit: 1000000,
+            pull_block_interval: DEFAULT_PULL_BLOCK_INTERVAL,
         }
     }
 }
