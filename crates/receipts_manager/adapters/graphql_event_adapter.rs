@@ -101,6 +101,21 @@ pub mod tests;
 #[cfg(test)]
 pub mod fuel_core_mock;
 
+/// Default polling interval for the new-block pull fallback, used when the
+/// node has block subscriptions disabled.
+pub const DEFAULT_PULL_BLOCK_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Ordered stream of finalized blocks for one height range.
+pub type RangeBlocksStream =
+    futures::stream::BoxStream<'static, anyhow::Result<FinalizedBlock>>;
+
+/// Range-fetch strategy injected into the new-block pull fallback. Lets a
+/// wrapping fetcher (e.g. the hybrid GraphQL+RPC one) route the gap fetches
+/// of pull-mode catch-up through its own `finalized_blocks_for_range`
+/// instead of the plain GraphQL one.
+pub type RangeFetcher =
+    Arc<dyn Fn(RangeInclusive<u32>) -> RangeBlocksStream + Send + Sync>;
+
 #[derive(Clone)]
 pub struct GraphqlFetcher {
     client: Arc<FuelClient>,
@@ -109,6 +124,7 @@ pub struct GraphqlFetcher {
     blocks_request_batch_size: usize,
     blocks_request_concurrency: usize,
     pending_blocks_limit: usize,
+    pull_block_interval: Duration,
 }
 
 pub struct GraphqlEventAdapterConfig {
@@ -118,6 +134,9 @@ pub struct GraphqlEventAdapterConfig {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// Polling interval of the new-block pull fallback (used when block
+    /// subscriptions are disabled on the node).
+    pub pull_block_interval: Duration,
 }
 
 impl Fetcher for GraphqlFetcher {
@@ -250,105 +269,10 @@ impl Fetcher for GraphqlFetcher {
     }
 
     fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>> {
-        let (tx, rx) = broadcast::channel(self.heartbeat_capacity.into());
-        let client_clone = self.client.clone();
-        let fetcher = self.clone();
-
-        tokio::spawn(async move {
-            tracing::info!("Subscribing to heartbeat events");
-
-            let result = client_clone.new_blocks_subscription().await;
-
-            let pull_mode = {
-                let tx = tx.clone();
-                async move {
-                    tracing::warn!("Block subscriptions are disabled on the Fuel node.");
-                    let stream =
-                        fetcher.pull_block_stream(Duration::from_millis(200)).await;
-                    pin_mut!(stream);
-
-                    while let Some(result) = stream.next().await {
-                        match result {
-                            Ok(block) => {
-                                if tx.send(block).is_err() {
-                                    return;
-                                }
-                            }
-                            Err(err) => {
-                                tracing::error!(
-                                    "Error fetching block via polling: {err}"
-                                );
-                            }
-                        }
-                    }
-                }
-            };
-
-            let mut subscription = match result {
-                Ok(subscription) => subscription,
-                Err(err) => {
-                    if err.to_string().contains("--expensive-subscriptions") {
-                        pull_mode.await
-                    } else {
-                        tracing::error!(
-                            "Failed to subscribe to preconfirmation events: {err:?}"
-                        );
-                    }
-                    return;
-                }
-            };
-
-            loop {
-                match subscription.next().await {
-                    Some(Ok(import_result)) => {
-                        let statuses = import_result.tx_status;
-
-                        let consensus = import_result.sealed_block.consensus.clone();
-
-                        let (header, _transactions) =
-                            import_result.sealed_block.entity.into_inner();
-                        #[cfg(feature = "blocks-subscription")]
-                        let transactions =
-                            _transactions.into_iter().map(Arc::new).collect::<Vec<_>>();
-
-                        let block = FinalizedBlock {
-                            header,
-                            consensus,
-                            #[cfg(feature = "blocks-subscription")]
-                            transactions,
-                            statuses,
-                        };
-
-                        if tx.send(block).is_err() {
-                            tracing::info!("Heartbeat event channel closed");
-                            return;
-                        }
-                    }
-                    Some(Err(err)) => {
-                        if err.to_string().contains("--expensive-subscriptions") {
-                            pull_mode.await
-                        } else {
-                            tracing::error!("Heartbeat subscription error: {err:?}");
-                        }
-                        return;
-                    }
-                    None => {
-                        tracing::info!("Heartbeat subscription ended");
-                        return;
-                    }
-                }
-            }
-        });
-
-        use futures::stream::StreamExt;
-        let stream = BroadcastStream::new(rx)
-            .take_while(|result| {
-                let good = result.is_ok();
-                async move { good }
-            })
-            .map(|result| result.expect("We only take successful results; qed"));
-
-        Ok(stream.into_boxed())
+        let this = self.clone();
+        let range_fetcher: RangeFetcher =
+            Arc::new(move |range| this.finalized_blocks_for_range(range).boxed());
+        self.finalized_blocks_stream_with_ranges(range_fetcher)
     }
 
     fn finalized_blocks_for_range(
@@ -535,7 +459,14 @@ impl Fetcher for GraphqlFetcher {
             Some(Ok(block))
         });
 
-        let (sender, receiver) = mpsc::unbounded_channel();
+        // Bounded — same reasoning as the RPC adapter: an unbounded channel
+        // here grows without limit whenever the downstream consumer stalls
+        // (rocksdb compaction, slow broadcast subscriber, etc.) because
+        // `controller.set_latest_height` advances on every successful send
+        // and releases more chunks. Bounding to `pending_blocks_limit`
+        // applies backpressure all the way back to the GraphQL fetcher.
+        let (sender, receiver) =
+            mpsc::channel::<anyhow::Result<FinalizedBlock>>(self.pending_blocks_limit);
 
         tokio::spawn(async move {
             let unordered_stream = unordered_stream;
@@ -550,7 +481,7 @@ impl Fetcher for GraphqlFetcher {
                         ready_blocks.insert(*block.header.height(), block);
                     }
                     Err(err) => {
-                        let _ = sender.send(Err(err));
+                        let _ = sender.send(Err(err)).await;
                         break;
                     }
                 }
@@ -558,7 +489,7 @@ impl Fetcher for GraphqlFetcher {
                 while let Some(entry) = ready_blocks.first_entry() {
                     if **entry.key() == *remaining_range.start() {
                         let block = entry.remove();
-                        if sender.send(Ok(block)).is_err() {
+                        if sender.send(Ok(block)).await.is_err() {
                             return;
                         }
                         remaining_range = (remaining_range.start().saturating_add(1))
@@ -572,7 +503,7 @@ impl Fetcher for GraphqlFetcher {
             }
         });
 
-        tokio_stream::wrappers::UnboundedReceiverStream::new(receiver)
+        tokio_stream::wrappers::ReceiverStream::new(receiver)
     }
 
     async fn last_height(&self) -> anyhow::Result<BlockHeight> {
@@ -613,6 +544,7 @@ pub fn create_graphql_event_adapter(config: GraphqlEventAdapterConfig) -> Graphq
         blocks_request_batch_size: config.blocks_request_batch_size,
         blocks_request_concurrency: config.blocks_request_concurrency,
         pending_blocks_limit: config.pending_blocks_limit,
+        pull_block_interval: config.pull_block_interval,
     }
 }
 
@@ -686,17 +618,136 @@ pub async fn blocks_for(
 }
 
 impl GraphqlFetcher {
+    /// Like [`Fetcher::finalized_blocks_stream`], but pull-mode catch-up
+    /// (used when block subscriptions are disabled on the node) fetches gap
+    /// ranges through `range_fetcher` instead of this fetcher's own
+    /// `finalized_blocks_for_range`.
+    pub fn finalized_blocks_stream_with_ranges(
+        &self,
+        range_fetcher: RangeFetcher,
+    ) -> anyhow::Result<BoxStream<FinalizedBlock>> {
+        let (tx, rx) = broadcast::channel(self.heartbeat_capacity.into());
+        let client_clone = self.client.clone();
+        let fetcher = self.clone();
+
+        tokio::spawn(async move {
+            tracing::info!("Subscribing to heartbeat events");
+
+            let result = client_clone.new_blocks_subscription().await;
+
+            let pull_mode = {
+                let tx = tx.clone();
+                async move {
+                    tracing::warn!("Block subscriptions are disabled on the Fuel node.");
+                    let interval = fetcher.pull_block_interval;
+                    let stream = fetcher.pull_block_stream(interval, range_fetcher).await;
+                    pin_mut!(stream);
+
+                    while let Some(result) = stream.next().await {
+                        match result {
+                            Ok(block) => {
+                                if tx.send(block).is_err() {
+                                    return;
+                                }
+                            }
+                            Err(err) => {
+                                tracing::error!(
+                                    "Error fetching block via polling: {err}"
+                                );
+                            }
+                        }
+                    }
+                }
+            };
+
+            let mut subscription = match result {
+                Ok(subscription) => subscription,
+                Err(err) => {
+                    if err.to_string().contains("--expensive-subscriptions") {
+                        pull_mode.await
+                    } else {
+                        tracing::error!(
+                            "Failed to subscribe to preconfirmation events: {err:?}"
+                        );
+                    }
+                    return;
+                }
+            };
+
+            loop {
+                match subscription.next().await {
+                    Some(Ok(import_result)) => {
+                        let statuses = import_result.tx_status;
+
+                        let consensus = import_result.sealed_block.consensus.clone();
+
+                        let (header, _transactions) =
+                            import_result.sealed_block.entity.into_inner();
+                        #[cfg(feature = "blocks-subscription")]
+                        let transactions =
+                            _transactions.into_iter().map(Arc::new).collect::<Vec<_>>();
+
+                        let block = FinalizedBlock {
+                            header,
+                            consensus,
+                            #[cfg(feature = "blocks-subscription")]
+                            transactions,
+                            statuses,
+                        };
+
+                        if tx.send(block).is_err() {
+                            tracing::info!("Heartbeat event channel closed");
+                            return;
+                        }
+                    }
+                    Some(Err(err)) => {
+                        if err.to_string().contains("--expensive-subscriptions") {
+                            pull_mode.await
+                        } else {
+                            tracing::error!("Heartbeat subscription error: {err:?}");
+                        }
+                        return;
+                    }
+                    None => {
+                        tracing::info!("Heartbeat subscription ended");
+                        return;
+                    }
+                }
+            }
+        });
+
+        use futures::stream::StreamExt;
+        let stream = BroadcastStream::new(rx)
+            .take_while(|result| {
+                let good = result.is_ok();
+                async move { good }
+            })
+            .map(|result| result.expect("We only take successful results; qed"));
+
+        Ok(stream.into_boxed())
+    }
+
     async fn pull_block_stream(
         &self,
         interval_duration: Duration,
+        range_fetcher: RangeFetcher,
     ) -> impl Stream<Item = anyhow::Result<FinalizedBlock>> {
+        use std::sync::atomic::{
+            AtomicU32,
+            Ordering,
+        };
+
         let last_known_height = match self.last_height().await {
             Ok(height) => *height,
             Err(err) => {
                 return futures::stream::once(async { Err(err) }).left_stream();
             }
         };
-        let last_known_height = Arc::new(tokio::sync::Mutex::new(last_known_height));
+        // Advanced per *delivered* block (not when a range fetch is merely
+        // started), so a range that errors or ends early is re-requested
+        // from the last delivered height on the next tick instead of being
+        // skipped forever.
+        let last_known_height = Arc::new(AtomicU32::new(last_known_height));
 
         // Create an interval stream that ticks every X seconds
         let interval = interval_at(Instant::now() + interval_duration, interval_duration);
@@ -704,9 +755,8 @@ impl GraphqlFetcher {
         // Convert the Interval stream into a stream of results
         tokio_stream::wrappers::IntervalStream::new(interval)
             .filter_map(move |_| {
-                // We must spawn a new task to run the async logic for each tick.
-                // The spawned task runs the fetch_data future.
                 let last_known_height = last_known_height.clone();
+                let range_fetcher = range_fetcher.clone();
                 async move {
                     let current_known_height = match self.last_height().await {
                         Ok(height) => *height,
@@ -715,13 +765,20 @@ impl GraphqlFetcher {
                         }
                     };
 
-                    let mut last_known_height = last_known_height.lock().await;
+                    let last = last_known_height.load(Ordering::Acquire);
 
-                    if current_known_height > *last_known_height {
-                        let stream = self.finalized_blocks_for_range(
-                            (*last_known_height + 1)..=current_known_height,
-                        );
-                        *last_known_height = current_known_height;
+                    if current_known_height > last {
+                        let stream =
+                            range_fetcher(last.saturating_add(1)..=current_known_height)
+                                .map(move |result| {
+                                    if let Ok(block) = &result {
+                                        last_known_height.fetch_max(
+                                            (*block.header.height()).into(),
+                                            Ordering::AcqRel,
+                                        );
+                                    }
+                                    result
+                                });
                         Some(Ok(stream))
                     } else {
                         None

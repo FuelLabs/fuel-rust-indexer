@@ -19,6 +19,7 @@ rocksdb = [
 ]
 blocks-subscription = []
 clap = ["dep:clap"]
+rpc = ["fuel-core-client/rpc"]
 test-helpers = ["rocksdb", "fuel-storage-utils/test-helpers"]
 
 [dependencies]
@@ -56,3 +57,4 @@ fuel-core-client = { workspace = true }
 fuel-core = { workspace = true, features = ["test-helpers"] }
 fuel-core-chain-config = { workspace = true, features = ["test-helpers"] }
 fuel-core-services = { workspace = true, features = ["test-helpers"] }
+fuel-storage-utils = { workspace = true, features = ["rocksdb", "test-helpers"] }

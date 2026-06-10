@@ -38,3 +38,6 @@ strum_macros = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-stream = { version = "0.1", features = ["full"] }
 tracing = { workspace = true }
+
+[dev-dependencies]
+fuel-storage-utils = { workspace = true, features = ["rocksdb", "test-helpers"] }
