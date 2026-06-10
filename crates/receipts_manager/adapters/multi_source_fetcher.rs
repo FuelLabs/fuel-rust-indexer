@@ -60,21 +60,23 @@ use std::{
 };
 use url::Url;
 
-/// Generic over the per-source [`Fetcher`] implementation (GraphQL or RPC).
-/// Both `main` and `sources` use the same fetcher type — mixing GraphQL and
-/// RPC sources in one [`MultiSourceFetcher`] is not supported.
+/// Generic over the main fetcher `F` (serves bulk ranges and the chain tip)
+/// and the per-source fetcher `S` (serves the merged preconfirmation and
+/// realtime-block subscriptions). They default to the same type; the hybrid
+/// mode uses `F = HybridFetcher, S = GraphqlFetcher` because subscription
+/// sources never fetch ranges and therefore never need an RPC endpoint.
 #[derive(Clone)]
-pub struct MultiSourceFetcher<F = GraphqlFetcher> {
+pub struct MultiSourceFetcher<F = GraphqlFetcher, S = F> {
     main: F,
-    sources: Vec<F>,
+    sources: Vec<S>,
     router: Arc<Mutex<RouterState>>,
 }
 
-impl<F> MultiSourceFetcher<F> {
+impl<F, S> MultiSourceFetcher<F, S> {
     /// Build directly from pre-constructed fetchers. Lets callers wire any
     /// `Fetcher` implementation without going through the GraphQL- or
     /// RPC-specific URL builders.
-    pub fn from_fetchers(main: F, sources: Vec<F>) -> Self {
+    pub fn from_fetchers(main: F, sources: Vec<S>) -> Self {
         Self {
             main,
             sources,
@@ -104,8 +106,10 @@ pub struct MultiSourceRpcConfig {
     pub main_graphql_urls: Vec<Url>,
     /// RPC (protobuf) URL paired with `main_graphql_urls`.
     pub main_rpc_url: Url,
-    /// Each subscription source: one GraphQL URL paired with one RPC URL.
-    pub subscription_sources: Vec<RpcSource>,
+    /// Dedicated GraphQL endpoints used exclusively for preconfirmation and
+    /// realtime-block subscriptions. Subscription sources never fetch block
+    /// ranges, so they don't need an RPC endpoint.
+    pub subscription_sources: Vec<Url>,
     pub heartbeat_capacity: NonZeroUsize,
     pub event_capacity: NonZeroUsize,
     /// Size of each parallel `get_block_range` window during backfill.
@@ -122,13 +126,6 @@ pub struct MultiSourceRpcConfig {
     /// Polling interval of the new-block pull fallback (used when block
     /// subscriptions are unavailable).
     pub pull_block_interval: Duration,
-}
-
-#[cfg(feature = "rpc")]
-#[derive(Debug, Clone)]
-pub struct RpcSource {
-    pub graphql_url: Url,
-    pub rpc_url: Url,
 }
 
 impl MultiSourceFetcher<GraphqlFetcher> {
@@ -176,10 +173,11 @@ impl MultiSourceFetcher<GraphqlFetcher> {
 }
 
 #[cfg(feature = "rpc")]
-impl MultiSourceFetcher<HybridFetcher> {
-    /// Builds a multi-source fetcher whose every source is a
-    /// [`HybridFetcher`]: bulk synchronization over RPC, everything else
-    /// (preconfirmations, realtime blocks, chain tip) over GraphQL.
+impl MultiSourceFetcher<HybridFetcher, GraphqlFetcher> {
+    /// Builds a multi-source fetcher with a [`HybridFetcher`] main (bulk
+    /// synchronization over RPC; preconfirmations, realtime blocks, and the
+    /// chain tip over GraphQL) and plain GraphQL subscription sources —
+    /// per-source fetchers only serve subscriptions, which never touch RPC.
     pub async fn new_hybrid(config: MultiSourceRpcConfig) -> anyhow::Result<Self> {
         let MultiSourceRpcConfig {
             main_graphql_urls,
@@ -208,48 +206,40 @@ impl MultiSourceFetcher<HybridFetcher> {
             .consensus_parameters
             .chain_id();
 
-        // Both halves of a hybrid share one `FuelClient`: the GraphQL and
-        // RPC endpoints of a source are paired by construction.
-        let build = |client: Arc<FuelClient>| -> HybridFetcher {
-            let graphql = create_graphql_event_adapter(GraphqlEventAdapterConfig {
-                client: client.clone(),
-                heartbeat_capacity,
-                event_capacity,
-                blocks_request_batch_size,
-                blocks_request_concurrency,
-                pending_blocks_limit,
-                pull_block_interval,
-            });
-            let rpc = create_rpc_event_adapter(RpcEventAdapterConfig {
+        let build_graphql = |client: Arc<FuelClient>| -> GraphqlFetcher {
+            create_graphql_event_adapter(GraphqlEventAdapterConfig {
                 client,
-                chain_id,
                 heartbeat_capacity,
                 event_capacity,
                 blocks_request_batch_size,
                 blocks_request_concurrency,
                 pending_blocks_limit,
                 pull_block_interval,
-            });
-            HybridFetcher::new(graphql, rpc, sync_tail_blocks)
+            })
         };
 
-        let main = build(main_client);
+        // Both halves of the hybrid main share one `FuelClient`: its GraphQL
+        // and RPC endpoints are paired by construction.
+        let graphql = build_graphql(main_client.clone());
+        let rpc = create_rpc_event_adapter(RpcEventAdapterConfig {
+            client: main_client,
+            chain_id,
+            heartbeat_capacity,
+            event_capacity,
+            blocks_request_batch_size,
+            blocks_request_concurrency,
+            pending_blocks_limit,
+            pull_block_interval,
+        });
+        let main = HybridFetcher::new(graphql, rpc, sync_tail_blocks);
 
-        let mut sources = Vec::with_capacity(subscription_sources.len());
-        for RpcSource {
-            graphql_url,
-            rpc_url,
-        } in subscription_sources
-        {
-            let client = Arc::new(
-                FuelClient::new_with_rpc(
-                    std::iter::once(graphql_url.as_str()),
-                    rpc_url.as_str(),
-                )
-                .await?,
-            );
-            sources.push(build(client));
-        }
+        let sources = subscription_sources
+            .into_iter()
+            .map(|url| {
+                let client = Arc::new(FuelClient::new(url.clone())?);
+                Ok::<_, anyhow::Error>(build_graphql(client))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         Ok(Self {
             main,
@@ -433,9 +423,10 @@ where
     .into_boxed()
 }
 
-impl<F> Fetcher for MultiSourceFetcher<F>
+impl<F, S> Fetcher for MultiSourceFetcher<F, S>
 where
     F: Fetcher + Clone,
+    S: Fetcher + Clone,
 {
     fn predicted_receipts_stream(
         &self,
@@ -453,7 +444,7 @@ where
                     f.clone(),
                     SourceId(i),
                     "preconfirmation",
-                    |f: &F| f.predicted_receipts_stream(),
+                    |f: &S| f.predicted_receipts_stream(),
                 )
             })
             .collect::<Vec<_>>();
@@ -501,7 +492,7 @@ where
                     f.clone(),
                     SourceId(i),
                     "finalized block",
-                    |f: &F| f.finalized_blocks_stream(),
+                    |f: &S| f.finalized_blocks_stream(),
                 )
             })
             .collect::<Vec<_>>();

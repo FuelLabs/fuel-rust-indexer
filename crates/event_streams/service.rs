@@ -17,10 +17,7 @@ use fuel_events_manager::service::{
 #[cfg(feature = "rpc")]
 use fuel_receipts_manager::adapters::{
     hybrid_fetcher::HybridFetcher,
-    multi_source_fetcher::{
-        MultiSourceRpcConfig,
-        RpcSource,
-    },
+    multi_source_fetcher::MultiSourceRpcConfig,
 };
 use fuel_receipts_manager::{
     adapters::{
@@ -119,7 +116,7 @@ where
 
 #[cfg(feature = "rpc")]
 pub type RpcTask<Processor, ES, RS> =
-    Task<Processor, ES, RS, MultiSourceFetcher<HybridFetcher>>;
+    Task<Processor, ES, RS, MultiSourceFetcher<HybridFetcher, GraphqlFetcher>>;
 
 #[async_trait::async_trait]
 impl<Processor, RS, ES, F> RunnableService for Task<Processor, ES, RS, F>
@@ -300,9 +297,10 @@ pub struct RpcConfig {
     /// synchronization only, while the indexer is more than
     /// `sync_tail_blocks` behind the chain tip.
     pub fuel_rpc_url: Url,
-    /// Each subscription source pairs a GraphQL URL (preconfs) with an RPC
-    /// URL (block stream / range).
-    pub subscription_sources: Vec<RpcSource>,
+    /// Dedicated GraphQL endpoints used exclusively for preconfirmation and
+    /// realtime-block subscriptions. Subscription sources never fetch block
+    /// ranges, so they don't need an RPC endpoint.
+    pub subscription_sources: Vec<Url>,
     pub heartbeat_capacity: NonZeroUsize,
     pub event_capacity: NonZeroUsize,
     pub blocks_request_batch_size: usize,
@@ -340,10 +338,7 @@ impl RpcConfig {
         }
     }
 
-    pub fn with_subscription_sources(
-        mut self,
-        subscription_sources: Vec<RpcSource>,
-    ) -> Self {
+    pub fn with_subscription_sources(mut self, subscription_sources: Vec<Url>) -> Self {
         self.subscription_sources = subscription_sources;
         self
     }
