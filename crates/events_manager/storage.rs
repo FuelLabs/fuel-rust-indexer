@@ -35,6 +35,7 @@ pub enum Column {
     Metadata = 0,
     Events = 1,
     LastCheckpoint = 2,
+    Timestamps = 3,
 }
 
 impl Column {
@@ -79,6 +80,27 @@ where
 
     fn column() -> Self::Column {
         Column::Events
+    }
+}
+
+/// Stores the committed block timestamp (seconds since the Unix epoch) per
+/// block height, so that checkpoints reconstructed from storage during replay
+/// can carry the same timestamp as the block header they were committed with.
+pub struct Timestamps;
+
+impl Mappable for Timestamps {
+    type Key = Self::OwnedKey;
+    type OwnedKey = BlockHeight;
+    type Value = Self::OwnedValue;
+    type OwnedValue = u128;
+}
+
+impl TableWithBlueprint for Timestamps {
+    type Blueprint = Plain<Primitive<4>, Postcard>;
+    type Column = Column;
+
+    fn column() -> Self::Column {
+        Column::Timestamps
     }
 }
 

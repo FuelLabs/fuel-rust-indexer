@@ -62,10 +62,19 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::storage::Blocks;
 #[cfg(not(feature = "blocks-subscription"))]
 use crate::storage::Headers;
-#[cfg(not(feature = "blocks-subscription"))]
 use fuel_core_types::blockchain::header::BlockHeader;
 #[cfg(feature = "blocks-subscription")]
 use fuel_indexer_types::events::BlockEvent;
+
+/// Returns the block's timestamp in seconds since the Unix epoch.
+fn header_timestamp(header: &BlockHeader) -> anyhow::Result<u128> {
+    u128::try_from(header.time().to_unix()).map_err(|_| {
+        anyhow::anyhow!(
+            "Block {} has a timestamp before the Unix epoch",
+            header.height()
+        )
+    })
+}
 
 #[cfg(test)]
 mod service_tests;
@@ -254,6 +263,7 @@ where
         broadcast_pending_events: bool,
     ) -> anyhow::Result<()> {
         let block_height = *block.header.height();
+        let block_timestamp = header_timestamp(&block.header)?;
         let checkpoint_height = *self.checkpoint_height.borrow();
 
         // If the block height is less than or equal to the checkpoint height,
@@ -384,6 +394,7 @@ where
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height,
                 events_count,
+                timestamp: block_timestamp,
             }),
         )?;
         #[cfg(feature = "blocks-subscription")]
@@ -666,6 +677,7 @@ where
             let checkpoint_event = UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: next_available_height,
                 events_count: events.len(),
+                timestamp: shared_state.timestamp_at(&next_available_height)?,
             });
 
             let iter = events
@@ -684,28 +696,28 @@ where
             )
         });
 
+        let shared_state = self.clone();
         let storage_iter_until_available_height = storage_iter
             .take_while(move |result| match result {
                 Ok((block_height, _)) => *block_height <= available_height,
                 Err(_) => true,
             })
-            .map(|result| {
-                result
-                    .map(|(block_height, events)| {
-                        let checkpoint_event =
-                            UnstableReceipts::Checkpoint(CheckpointEvent {
-                                block_height,
-                                events_count: events.len(),
-                            });
+            .map(move |result| {
+                let (block_height, events) = result
+                    .map_err(|e| anyhow::anyhow!("Storage iterator error: {}", e))?;
 
-                        let iter = events
-                            .into_iter()
-                            .map(UnstableReceipts::from)
-                            .chain(iter::once(checkpoint_event));
+                let checkpoint_event = UnstableReceipts::Checkpoint(CheckpointEvent {
+                    block_height,
+                    events_count: events.len(),
+                    timestamp: shared_state.timestamp_at(&block_height)?,
+                });
 
-                        futures::stream::iter(iter.map(Ok))
-                    })
-                    .map_err(|e| anyhow::anyhow!("Storage iterator error: {}", e))
+                let iter = events
+                    .into_iter()
+                    .map(UnstableReceipts::from)
+                    .chain(iter::once(checkpoint_event));
+
+                Ok::<_, anyhow::Error>(futures::stream::iter(iter.map(Ok)))
             });
 
         let storage_iter_until_available_height =
@@ -858,6 +870,21 @@ where
             .map(|v| v.into_owned());
 
         Ok(header)
+    }
+
+    /// Returns the committed block's timestamp in seconds since the Unix epoch.
+    pub fn timestamp_at(&self, block_height: &BlockHeight) -> anyhow::Result<u128> {
+        #[cfg(not(feature = "blocks-subscription"))]
+        let header = self.header_at(block_height)?.ok_or_else(|| {
+            anyhow::anyhow!("No block header for height {block_height}")
+        })?;
+        #[cfg(feature = "blocks-subscription")]
+        let header = self
+            .blocks_at(block_height)?
+            .ok_or_else(|| anyhow::anyhow!("No block for height {block_height}"))?
+            .header;
+
+        header_timestamp(&header)
     }
 }
 

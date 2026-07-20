@@ -57,6 +57,24 @@ fn default_tx_id() -> fuel_core_types::fuel_tx::TxId {
         .unwrap()
 }
 
+/// Checkpoints carry the block's wall-clock timestamp, which is not
+/// deterministic across test runs. Assert it was populated (non-zero) and then
+/// zero it so the rest of the event can be compared exactly.
+fn normalize_checkpoint_timestamps(
+    mut events: Vec<UnstableReceipts>,
+) -> Vec<UnstableReceipts> {
+    for event in &mut events {
+        if let UnstableReceipts::Checkpoint(checkpoint) = event {
+            assert_ne!(
+                checkpoint.timestamp, 0,
+                "checkpoint timestamp should be populated from the block header"
+            );
+            checkpoint.timestamp = 0;
+        }
+    }
+    events
+}
+
 #[tokio::test]
 async fn uninitialized_service__events_starting_from__returns_events_after_subscription()
 {
@@ -87,7 +105,9 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     let _ = task.run(&mut StateWatcher::started()).await;
 
     // Then
-    let result = stream.take(2).try_collect::<Vec<_>>().await.unwrap();
+    let result = normalize_checkpoint_timestamps(
+        stream.take(2).try_collect::<Vec<_>>().await.unwrap(),
+    );
     assert_eq!(
         result,
         vec![
@@ -100,6 +120,7 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
                 events_count: 1,
+                timestamp: 0,
             })
         ],
         "Should return an event from the subscription"
@@ -140,7 +161,9 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
         .unwrap();
 
     // Then
-    let result = stream.take(4).try_collect::<Vec<_>>().await.unwrap();
+    let result = normalize_checkpoint_timestamps(
+        stream.take(4).try_collect::<Vec<_>>().await.unwrap(),
+    );
     assert_eq!(
         result,
         vec![
@@ -152,15 +175,18 @@ async fn uninitialized_service__events_starting_from__returns_events_before_subs
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
-                events_count: 1
+                events_count: 1,
+                timestamp: 0,
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 2u32.into(),
-                events_count: 0
+                events_count: 0,
+                timestamp: 0,
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 3u32.into(),
-                events_count: 0
+                events_count: 0,
+                timestamp: 0,
             }),
         ],
         "Should return an event from the subscription"
@@ -201,7 +227,9 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
     let _ = task.run(&mut StateWatcher::started()).await;
 
     // Then
-    let result = stream.take(4).try_collect::<Vec<_>>().await.unwrap();
+    let result = normalize_checkpoint_timestamps(
+        stream.take(4).try_collect::<Vec<_>>().await.unwrap(),
+    );
     assert_eq!(
         result,
         vec![
@@ -213,15 +241,18 @@ async fn uninitialized_service__events_starting_from__returns_events_middle_subs
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 1u32.into(),
-                events_count: 1
+                events_count: 1,
+                timestamp: 0,
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 2u32.into(),
-                events_count: 0
+                events_count: 0,
+                timestamp: 0,
             }),
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height: 3u32.into(),
-                events_count: 0
+                events_count: 0,
+                timestamp: 0,
             }),
         ],
         "Should return an event from the subscription"
@@ -266,7 +297,9 @@ async fn uninitialized_service__events_starting_from__returns_events_after_subsc
     });
 
     // Then
-    let result = stream.take(1).try_collect::<Vec<_>>().await.unwrap();
+    let result = normalize_checkpoint_timestamps(
+        stream.take(1).try_collect::<Vec<_>>().await.unwrap(),
+    );
     let UnstableReceipts::Receipts(event) = &result[0] else {
         panic!("Expected a TransactionEvent");
     };
