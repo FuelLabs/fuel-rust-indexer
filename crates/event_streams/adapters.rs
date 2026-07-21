@@ -31,6 +31,28 @@ where
     }
 }
 
+/// Exposes the receipts manager's block-header timestamps to the events
+/// manager, which stores only events and so cannot stamp the checkpoints it
+/// replays from its own storage without this.
+pub struct ReceiptsTimestamps<S> {
+    receipts: fuel_receipts_manager::service::SharedState<S>,
+}
+
+impl<S> ReceiptsTimestamps<S> {
+    pub fn new(receipts: fuel_receipts_manager::service::SharedState<S>) -> Self {
+        Self { receipts }
+    }
+}
+
+impl<S> fuel_events_manager::port::BlockTimestamps for ReceiptsTimestamps<S>
+where
+    S: fuel_receipts_manager::port::Storage,
+{
+    fn timestamp_at(&self, block_height: &BlockHeight) -> anyhow::Result<u128> {
+        self.receipts.timestamp_at(block_height)
+    }
+}
+
 pub struct SimplerProcessorAdapter<R> {
     processor: ReceiptProcessor<R>,
 }

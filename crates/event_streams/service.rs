@@ -1,4 +1,7 @@
-use crate::adapters::StreamsAdapter;
+use crate::adapters::{
+    ReceiptsTimestamps,
+    StreamsAdapter,
+};
 use fuel_core_services::{
     RunnableService,
     RunnableTask,
@@ -212,31 +215,13 @@ where
         &self,
         starting_block_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
-        use fuel_core_services::stream::IntoBoxStream;
-        use futures::StreamExt;
-
-        let stream = self
-            .events
+        // Every checkpoint already carries its block header's timestamp: live
+        // checkpoints get it from the header received over the stream, and the
+        // historical ones replayed from storage are stamped by the events
+        // manager from the receipts storage (see `port::BlockTimestamps`).
+        self.events
             .unstable_events_starting_from(starting_block_height)
-            .await?;
-
-        // A checkpoint's timestamp is the block header's timestamp. The events
-        // manager only tracks events, so fill it here from the receipts manager,
-        // which owns the block headers.
-        let receipts = self.receipts.clone();
-        let stream = stream.map(move |result| {
-            let event = match result? {
-                UnstableEvent::Checkpoint(mut checkpoint) => {
-                    checkpoint.timestamp =
-                        receipts.timestamp_at(&checkpoint.block_height)?;
-                    UnstableEvent::Checkpoint(checkpoint)
-                }
-                event => event,
-            };
-            Ok(event)
-        });
-
-        Ok(stream.into_boxed())
+            .await
     }
 
     #[cfg(feature = "blocks-subscription")]
@@ -297,6 +282,7 @@ where
         starting_block_height,
         events_storage,
         StreamsAdapter::new(receipts_manager.shared.clone()),
+        std::sync::Arc::new(ReceiptsTimestamps::new(receipts_manager.shared.clone())),
     )?;
 
     let task = Task {
@@ -419,6 +405,7 @@ where
         starting_block_height,
         events_storage,
         StreamsAdapter::new(receipts_manager.shared.clone()),
+        std::sync::Arc::new(ReceiptsTimestamps::new(receipts_manager.shared.clone())),
     )?;
 
     let task: RpcTask<Processor, ES, RS> = Task {
