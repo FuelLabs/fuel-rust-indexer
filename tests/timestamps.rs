@@ -114,9 +114,12 @@ async fn unstable_stream__historical_checkpoints_carry_block_timestamp() {
     .expect("indexer did not catch up to the produced tip in time")
     .unwrap();
 
-    // When: we replay the unstable stream from genesis.
+    // When: we replay the events manager's unstable stream from genesis. This
+    // is the layer that owns the fix — it must stamp the checkpoints it
+    // replays from its own storage, without relying on any downstream backfill.
     let mut stream = indexer
         .shared
+        .events()
         .unstable_events_starting_from(0u32.into())
         .await
         .unwrap();
