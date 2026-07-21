@@ -45,6 +45,8 @@ pub struct SuccessfulTransactionReceipts {
 pub struct CheckpointEvent {
     pub block_height: BlockHeight,
     pub events_count: usize,
+    /// The committed block's timestamp, in seconds since the Unix epoch.
+    pub timestamp: u128,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

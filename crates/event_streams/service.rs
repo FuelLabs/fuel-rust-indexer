@@ -1,4 +1,7 @@
-use crate::adapters::StreamsAdapter;
+use crate::adapters::{
+    ReceiptsTimestamps,
+    StreamsAdapter,
+};
 use fuel_core_services::{
     RunnableService,
     RunnableTask,
@@ -212,6 +215,10 @@ where
         &self,
         starting_block_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
+        // Every checkpoint already carries its block header's timestamp: live
+        // checkpoints get it from the header received over the stream, and the
+        // historical ones replayed from storage are stamped by the events
+        // manager from the receipts storage (see `port::BlockTimestamps`).
         self.events
             .unstable_events_starting_from(starting_block_height)
             .await
@@ -275,6 +282,7 @@ where
         starting_block_height,
         events_storage,
         StreamsAdapter::new(receipts_manager.shared.clone()),
+        std::sync::Arc::new(ReceiptsTimestamps::new(receipts_manager.shared.clone())),
     )?;
 
     let task = Task {
@@ -397,6 +405,7 @@ where
         starting_block_height,
         events_storage,
         StreamsAdapter::new(receipts_manager.shared.clone()),
+        std::sync::Arc::new(ReceiptsTimestamps::new(receipts_manager.shared.clone())),
     )?;
 
     let task: RpcTask<Processor, ES, RS> = Task {

@@ -41,6 +41,18 @@ pub trait StreamsSource: Send + Sync + 'static {
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>>;
 }
 
+/// Source of block header timestamps for heights already committed to the
+/// receipts storage. The events manager persists only events — not block
+/// headers — so a checkpoint it replays from its own storage has no timestamp
+/// of its own; it stamps such checkpoints through this port. Live checkpoints
+/// already carry the timestamp from the header received over the stream and
+/// never consult this port.
+pub trait BlockTimestamps: Send + Sync + 'static {
+    /// The block header's timestamp (seconds since the Unix epoch) at
+    /// `block_height`. Errors if the height's header is not available.
+    fn timestamp_at(&self, block_height: &BlockHeight) -> anyhow::Result<u128>;
+}
+
 pub trait ReceiptsProcessor: Send + Sync + 'static {
     type Event: StorableEvent;
 

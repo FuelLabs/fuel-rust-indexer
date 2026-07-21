@@ -47,7 +47,7 @@ async fn rpc_sync__fetches_100_blocks_from_31m() {
     let batch = env_u32("RPC_SYNC_BATCH", 10) as usize;
     let conc = env_u32("RPC_SYNC_CONCURRENCY", 10) as usize;
 
-    let fetcher = MultiSourceFetcher::new_rpc(MultiSourceRpcConfig {
+    let fetcher = MultiSourceFetcher::new_hybrid(MultiSourceRpcConfig {
         main_graphql_urls: vec![graphql_url],
         main_rpc_url: rpc_url,
         subscription_sources: vec![],
@@ -56,6 +56,10 @@ async fn rpc_sync__fetches_100_blocks_from_31m() {
         blocks_request_batch_size: batch,
         blocks_request_concurrency: conc,
         pending_blocks_limit: 1024,
+        sync_tail_blocks:
+            fuel_receipts_manager::adapters::hybrid_fetcher::DEFAULT_SYNC_TAIL_BLOCKS,
+        pull_block_interval:
+            fuel_receipts_manager::adapters::graphql_event_adapter::DEFAULT_PULL_BLOCK_INTERVAL,
     })
     .await
     .expect("failed to build RPC fetcher");

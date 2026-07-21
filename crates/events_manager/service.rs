@@ -107,6 +107,7 @@ where
         starting_height: BlockHeight,
         storage: S,
         streams: StreamsSource,
+        timestamps: Arc<dyn super::port::BlockTimestamps>,
     ) -> anyhow::Result<Self> {
         let checkpoint_height = storage
             .read_transaction()
@@ -126,6 +127,7 @@ where
             unstable_broadcast: Arc::new(unstable_broadcast),
             stable_broadcast: Arc::new(stable_broadcast),
             checkpoint_height: checkpoint_height_receiver,
+            timestamps,
         };
 
         let _self = Self {
@@ -314,6 +316,7 @@ where
                             CheckpointEvent {
                                 block_height: checkpoint.block_height,
                                 events_count: total_events_count,
+                                timestamp: checkpoint.timestamp,
                             },
                         ));
 
@@ -416,6 +419,9 @@ pub struct SharedState<Event, S> {
     unstable_broadcast: Arc<broadcast::Sender<UnstableEvent<Event>>>,
     stable_broadcast: Arc<broadcast::Sender<TransactionEvents<Event>>>,
     checkpoint_height: watch::Receiver<BlockHeight>,
+    // Stamps checkpoints replayed from storage with their block header's
+    // timestamp (see `port::BlockTimestamps`).
+    timestamps: Arc<dyn super::port::BlockTimestamps>,
 }
 
 impl<Event, S> SharedState<Event, S>
@@ -496,9 +502,14 @@ where
                 .map(|events| events.events.len())
                 .sum::<usize>();
 
+            // Replayed from storage, so it has no timestamp of its own; stamp
+            // it with the block header's timestamp from the receipts storage.
             let checkpoint_event = UnstableEvent::Checkpoint(CheckpointEvent {
                 block_height: next_available_height,
                 events_count,
+                timestamp: shared_state
+                    .timestamps
+                    .timestamp_at(&next_available_height)?,
             });
 
             let iter = events
@@ -519,33 +530,38 @@ where
             )
         });
 
+        let timestamps = self.timestamps.clone();
         let storage_iter_until_available_height = storage_iter
             .take_while(move |result| match result {
                 Ok((block_height, _)) => *block_height <= available_height,
                 Err(_) => true,
             })
-            .map(|result| {
-                result
-                    .map(|(block_height, events)| {
-                        let events_count = events
-                            .iter()
-                            .map(|events| events.events.len())
-                            .sum::<usize>();
+            .map(move |result| {
+                let (block_height, events) = result
+                    .map_err(|e| anyhow::anyhow!("Storage iterator error: {}", e))?;
 
-                        let checkpoint_event =
-                            UnstableEvent::Checkpoint(CheckpointEvent {
-                                block_height,
-                                events_count,
-                            });
+                let events_count = events
+                    .iter()
+                    .map(|events| events.events.len())
+                    .sum::<usize>();
 
-                        let iter = events
-                            .into_iter()
-                            .map(|events| UnstableEvent::Transaction(events))
-                            .chain(iter::once(checkpoint_event));
+                // Replayed from storage, so it has no timestamp of its own;
+                // stamp it with the block header's timestamp from the receipts
+                // storage.
+                let checkpoint_event = UnstableEvent::Checkpoint(CheckpointEvent {
+                    block_height,
+                    events_count,
+                    timestamp: timestamps.timestamp_at(&block_height)?,
+                });
 
-                        futures::stream::iter(iter.map(Ok::<_, anyhow::Error>))
-                    })
-                    .map_err(|e| anyhow::anyhow!("Storage iterator error: {}", e))
+                let iter = events
+                    .into_iter()
+                    .map(|events| UnstableEvent::Transaction(events))
+                    .chain(iter::once(checkpoint_event));
+
+                Ok::<_, anyhow::Error>(futures::stream::iter(
+                    iter.map(Ok::<_, anyhow::Error>),
+                ))
             });
 
         let storage_iter_until_available_height =
@@ -689,12 +705,19 @@ pub fn new_service<Processor, S, StreamsSource>(
     starting_height: BlockHeight,
     storage: S,
     streams: StreamsSource,
+    timestamps: Arc<dyn super::port::BlockTimestamps>,
 ) -> anyhow::Result<EventManager<Processor, S, StreamsSource>>
 where
     Processor: super::port::ReceiptsProcessor,
     S: super::port::Storage,
     StreamsSource: super::port::StreamsSource,
 {
-    let uninit = UninitializedService::new(processor, starting_height, storage, streams)?;
+    let uninit = UninitializedService::new(
+        processor,
+        starting_height,
+        storage,
+        streams,
+        timestamps,
+    )?;
     Ok(ServiceRunner::new(uninit))
 }

@@ -7,3 +7,5 @@ pub mod logs_indexer;
 pub mod rollback;
 #[cfg(test)]
 pub mod rpc_sync;
+#[cfg(test)]
+pub mod timestamps;
