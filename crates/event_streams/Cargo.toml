@@ -33,6 +33,7 @@ fuel-events-manager = { workspace = true }
 fuel-indexer-types = { workspace = true }
 fuel-receipts-manager = { workspace = true }
 fuels = { workspace = true }
+futures = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }

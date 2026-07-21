@@ -1,7 +1,6 @@
 use crate::storage::{
     Events,
     LastCheckpoint,
-    Timestamps,
 };
 use fuel_core_services::{
     RunnableService,
@@ -323,8 +322,6 @@ where
 
                         tx.storage_as_mut::<Events<Processor::Event>>()
                             .insert(&next_block_height, &self.events)?;
-                        tx.storage_as_mut::<Timestamps>()
-                            .insert(&next_block_height, &checkpoint.timestamp)?;
                         tx.storage_as_mut::<LastCheckpoint>()
                             .insert(&(), &next_block_height)?;
 
@@ -431,17 +428,6 @@ where
         self.starting_height
     }
 
-    /// Returns the committed block's timestamp (seconds since the Unix epoch)
-    /// persisted at the given height when its checkpoint was committed.
-    pub fn timestamp_at(&self, block_height: &BlockHeight) -> anyhow::Result<u128> {
-        self.storage
-            .read_transaction()
-            .storage_as_ref::<Timestamps>()
-            .get(block_height)?
-            .map(|v| v.into_owned())
-            .ok_or_else(|| anyhow::anyhow!("No timestamp for height {block_height}"))
-    }
-
     pub async fn await_height(&self, height: BlockHeight) -> anyhow::Result<()> {
         let mut receiver = self.checkpoint_height.clone();
         loop {
@@ -511,18 +497,13 @@ where
                 .map(|events| events.events.len())
                 .sum::<usize>();
 
-            let timestamp = storage
-                .storage_as_ref::<Timestamps>()
-                .get(&next_available_height)?
-                .map(|v| v.into_owned())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("No timestamp for height {next_available_height}")
-                })?;
-
+            // The checkpoint timestamp is filled in by the top-level service
+            // from the block header (see `event_streams::service`), which owns
+            // the receipts storage; this manager only tracks events.
             let checkpoint_event = UnstableEvent::Checkpoint(CheckpointEvent {
                 block_height: next_available_height,
                 events_count,
-                timestamp,
+                timestamp: 0,
             });
 
             let iter = events
@@ -543,7 +524,6 @@ where
             )
         });
 
-        let shared_state = self.clone();
         let storage_iter_until_available_height = storage_iter
             .take_while(move |result| match result {
                 Ok((block_height, _)) => *block_height <= available_height,
@@ -558,10 +538,12 @@ where
                     .map(|events| events.events.len())
                     .sum::<usize>();
 
+                // Timestamp filled by the top-level service from the block
+                // header (this manager only tracks events).
                 let checkpoint_event = UnstableEvent::Checkpoint(CheckpointEvent {
                     block_height,
                     events_count,
-                    timestamp: shared_state.timestamp_at(&block_height)?,
+                    timestamp: 0,
                 });
 
                 let iter = events

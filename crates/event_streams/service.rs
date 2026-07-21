@@ -212,9 +212,31 @@ where
         &self,
         starting_block_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
-        self.events
+        use fuel_core_services::stream::IntoBoxStream;
+        use futures::StreamExt;
+
+        let stream = self
+            .events
             .unstable_events_starting_from(starting_block_height)
-            .await
+            .await?;
+
+        // A checkpoint's timestamp is the block header's timestamp. The events
+        // manager only tracks events, so fill it here from the receipts manager,
+        // which owns the block headers.
+        let receipts = self.receipts.clone();
+        let stream = stream.map(move |result| {
+            let event = match result? {
+                UnstableEvent::Checkpoint(mut checkpoint) => {
+                    checkpoint.timestamp =
+                        receipts.timestamp_at(&checkpoint.block_height)?;
+                    UnstableEvent::Checkpoint(checkpoint)
+                }
+                event => event,
+            };
+            Ok(event)
+        });
+
+        Ok(stream.into_boxed())
     }
 
     #[cfg(feature = "blocks-subscription")]
