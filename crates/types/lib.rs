@@ -2,3 +2,4 @@
 #![deny(warnings)]
 
 pub mod events;
+pub mod shutdown;

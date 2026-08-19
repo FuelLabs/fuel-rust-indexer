@@ -192,8 +192,11 @@ async fn unstable_events_starting_from__fails_once_the_indexer_is_stopped() {
     let err = result
         .err()
         .expect("building a stream against a closed checkpoint channel must fail");
+    // Typed, so a consumer can tell an orderly shutdown from a real failure and
+    // stop quietly instead of logging an error — no matching on message text.
     assert!(
-        err.to_string().contains("Checkpoint height channel is closed"),
-        "unexpected error: {err}"
+        err.downcast_ref::<fuel_indexer_types::shutdown::ServiceShutDown>()
+            .is_some(),
+        "expected ServiceShutDown, got: {err:?}"
     );
 }
