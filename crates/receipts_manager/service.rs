@@ -629,6 +629,16 @@ where
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
         use futures::TryStreamExt;
 
+        // The checkpoint sender is dropped when the service shuts down. A stream built
+        // against a closed channel can never advance: `await_height` returns `Err`
+        // immediately, and a consumer that reconnects on error gets a fresh handle that
+        // fails again with no await point in between — a busy loop. Refuse to build the
+        // stream so the shutdown is terminal for the consumer too, and return a typed
+        // `ServiceShutDown` so a consumer can recognise it without matching on text.
+        if self.checkpoint_height.has_changed().is_err() {
+            return Err(fuel_indexer_types::shutdown::ServiceShutDown.into());
+        }
+
         if start_height < self.starting_height {
             return Err(anyhow::anyhow!(
                 "Start height {} is less than the initial starting height {}",
