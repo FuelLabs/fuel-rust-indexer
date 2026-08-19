@@ -144,3 +144,56 @@ async fn defining_logs_indexer__blocks() {
     // Then
     assert!(result.is_ok());
 }
+
+/// Reproduces the condition behind a production busy loop: once the indexer has
+/// shut down, its checkpoint sender is dropped, so `await_height` inside the
+/// stream returns `Err` immediately and forever. A consumer that reconnects on
+/// stream error used to get a fresh handle built against that dead channel and
+/// spin at microsecond intervals. Building the stream must fail instead, so the
+/// consumer can treat the shutdown as terminal.
+#[tokio::test]
+async fn unstable_events_starting_from__fails_once_the_indexer_is_stopped() {
+    let node = FuelService::new_node(Config::local_node()).await.unwrap();
+    let url = Url::parse(format!("http://{}", node.bound_address).as_str()).unwrap();
+    let temp_dir = tempdir::TempDir::new("database").unwrap();
+    let database_config = DatabaseConfig {
+        cache_capacity: None,
+        max_fds: 512,
+        columns_policy: ColumnsPolicy::Lazy,
+    };
+
+    // Given
+    let indexer = fuel_event_streams::service::new_logs_streams(
+        parse_o2_logs,
+        temp_dir.path().to_path_buf(),
+        StateRewindPolicy::NoRewind,
+        database_config,
+        StreamsConfig::new(0u32.into(), true, vec![url]),
+    )
+    .unwrap();
+    indexer.start_and_await().await.unwrap();
+    assert!(
+        indexer
+            .shared
+            .unstable_events_starting_from(0u32.into())
+            .await
+            .is_ok(),
+        "the stream is obtainable while the service is running"
+    );
+
+    // When
+    indexer.stop_and_await().await.unwrap();
+    let result = indexer
+        .shared
+        .unstable_events_starting_from(0u32.into())
+        .await;
+
+    // Then
+    let err = result
+        .err()
+        .expect("building a stream against a closed checkpoint channel must fail");
+    assert!(
+        err.to_string().contains("Checkpoint height channel is closed"),
+        "unexpected error: {err}"
+    );
+}
