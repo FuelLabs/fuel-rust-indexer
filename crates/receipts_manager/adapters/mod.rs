@@ -25,6 +25,7 @@ pub fn new_service<S, F>(
     use_preconfirmations: bool,
     storage: S,
     fetcher: F,
+    heartbeat_retry_delay: std::time::Duration,
 ) -> anyhow::Result<ReceiptsManager<S, F>>
 where
     S: super::port::Storage,
@@ -35,6 +36,7 @@ where
         use_preconfirmations,
         storage,
         fetcher,
+        heartbeat_retry_delay,
     )
 }
 
@@ -58,6 +60,9 @@ pub struct ManagerConfig {
     pub blocks_request_batch_size: usize,
     pub blocks_request_concurrency: usize,
     pub pending_blocks_limit: usize,
+    /// How long to wait before retrying a heartbeat that could not be
+    /// processed. See [`crate::service::DEFAULT_HEARTBEAT_RETRY_DELAY`].
+    pub heartbeat_retry_delay: std::time::Duration,
 }
 
 pub type ReceiptGraphqlManager<Database> =
@@ -93,6 +98,7 @@ where
         blocks_request_batch_size,
         blocks_request_concurrency,
         pending_blocks_limit,
+        heartbeat_retry_delay,
     } = config;
 
     let fetcher = MultiSourceFetcher::new(MultiSourceFetcherConfig {
@@ -111,6 +117,7 @@ where
         use_preconfirmations,
         storage,
         fetcher,
+        heartbeat_retry_delay,
     )?;
 
     Ok(event_manager)
@@ -141,6 +148,9 @@ pub struct RpcManagerConfig {
     /// Polling interval of the new-block pull fallback (used when block
     /// subscriptions are unavailable).
     pub pull_block_interval: std::time::Duration,
+    /// How long to wait before retrying a heartbeat that could not be
+    /// processed. See [`crate::service::DEFAULT_HEARTBEAT_RETRY_DELAY`].
+    pub heartbeat_retry_delay: std::time::Duration,
 }
 
 #[cfg(feature = "rpc")]
@@ -164,6 +174,7 @@ where
         pending_blocks_limit,
         sync_tail_blocks,
         pull_block_interval,
+        heartbeat_retry_delay,
     } = config;
 
     let fetcher =
@@ -186,6 +197,7 @@ where
         use_preconfirmations,
         storage,
         fetcher,
+        heartbeat_retry_delay,
     )?;
 
     Ok(event_manager)

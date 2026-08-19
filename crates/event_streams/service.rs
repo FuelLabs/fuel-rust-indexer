@@ -36,6 +36,7 @@ use std::num::NonZeroUsize;
 use url::Url;
 
 pub use fuel_receipts_manager::adapters::graphql_event_adapter::DEFAULT_PULL_BLOCK_INTERVAL;
+pub use fuel_receipts_manager::service::DEFAULT_HEARTBEAT_RETRY_DELAY;
 /// Re-exported defaults so service consumers can fill config struct
 /// literals without reaching into `fuel_receipts_manager` internals.
 #[cfg(feature = "rpc")]
@@ -67,6 +68,10 @@ pub struct Config {
     /// Polling interval of the new-block pull fallback (used when block
     /// subscriptions are unavailable on the node).
     pub pull_block_interval: std::time::Duration,
+    /// How long to wait before retrying a heartbeat that could not be
+    /// processed. The usual cause is the node lagging a block behind, which
+    /// clears by itself. See [`DEFAULT_HEARTBEAT_RETRY_DELAY`].
+    pub heartbeat_retry_delay: std::time::Duration,
 }
 
 impl Config {
@@ -86,6 +91,7 @@ impl Config {
             blocks_request_concurrency: 100,
             pending_blocks_limit: 10_000,
             pull_block_interval: DEFAULT_PULL_BLOCK_INTERVAL,
+            heartbeat_retry_delay: DEFAULT_HEARTBEAT_RETRY_DELAY,
         }
     }
 
@@ -257,6 +263,7 @@ where
         blocks_request_concurrency,
         pending_blocks_limit,
         pull_block_interval,
+        heartbeat_retry_delay,
     } = config;
 
     let fetcher = MultiSourceFetcher::new(MultiSourceFetcherConfig {
@@ -275,6 +282,7 @@ where
         use_preconfirmations,
         receipts_storage,
         fetcher,
+        heartbeat_retry_delay,
     )?;
 
     let events_manager = fuel_events_manager::service::new_service(
@@ -320,6 +328,10 @@ pub struct RpcConfig {
     /// Polling interval of the new-block pull fallback (used when block
     /// subscriptions are unavailable on the node).
     pub pull_block_interval: std::time::Duration,
+    /// How long to wait before retrying a heartbeat that could not be
+    /// processed. The usual cause is the node lagging a block behind, which
+    /// clears by itself. See [`DEFAULT_HEARTBEAT_RETRY_DELAY`].
+    pub heartbeat_retry_delay: std::time::Duration,
 }
 
 #[cfg(feature = "rpc")]
@@ -343,6 +355,7 @@ impl RpcConfig {
             pending_blocks_limit: 10_000,
             sync_tail_blocks: DEFAULT_SYNC_TAIL_BLOCKS,
             pull_block_interval: DEFAULT_PULL_BLOCK_INTERVAL,
+            heartbeat_retry_delay: DEFAULT_HEARTBEAT_RETRY_DELAY,
         }
     }
 
@@ -377,6 +390,7 @@ where
         pending_blocks_limit,
         sync_tail_blocks,
         pull_block_interval,
+        heartbeat_retry_delay,
     } = config;
 
     let fetcher = MultiSourceFetcher::new_hybrid(MultiSourceRpcConfig {
@@ -398,6 +412,7 @@ where
         use_preconfirmations,
         receipts_storage,
         fetcher,
+        heartbeat_retry_delay,
     )?;
 
     let events_manager = fuel_events_manager::service::new_service(

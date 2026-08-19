@@ -79,8 +79,14 @@ fn header_timestamp(header: &BlockHeader) -> anyhow::Result<u128> {
 #[cfg(test)]
 mod service_tests;
 
+/// How long to wait before picking the next heartbeat back up after one could
+/// not be processed. Roughly a block time: the usual cause is the node we read
+/// from lagging, which clears as soon as it produces the block we waited for.
+pub const DEFAULT_HEARTBEAT_RETRY_DELAY: Duration = Duration::from_secs(1);
+
 pub struct UninitializedService<S, F> {
     use_preconfirmations: bool,
+    heartbeat_retry_delay: Duration,
     storage: S,
     event_fetcher: F,
     checkpoint_height: watch::Sender<BlockHeight>,
@@ -124,6 +130,7 @@ where
 
         let _self = Self {
             use_preconfirmations,
+            heartbeat_retry_delay: DEFAULT_HEARTBEAT_RETRY_DELAY,
             storage,
             event_fetcher,
             checkpoint_height,
@@ -131,6 +138,13 @@ where
         };
 
         Ok(_self)
+    }
+
+    /// Overrides how long the task waits before retrying a heartbeat it could
+    /// not process. Defaults to [`DEFAULT_HEARTBEAT_RETRY_DELAY`].
+    pub fn with_heartbeat_retry_delay(mut self, delay: Duration) -> Self {
+        self.heartbeat_retry_delay = delay;
+        self
     }
 }
 
@@ -140,6 +154,8 @@ pub struct Task<S, F> {
     fetcher: F,
     heartbeat: BoxStream<FinalizedBlock>,
     heartbeat_liveness: tokio::time::Interval,
+    /// See [`DEFAULT_HEARTBEAT_RETRY_DELAY`].
+    heartbeat_retry_delay: Duration,
     emitted_events: Vec<TransactionReceipts>,
     pending_events: BTreeMap<BlockHeight, BTreeMap<u16, TransactionReceipts>>,
     checkpoint_height: watch::Sender<BlockHeight>,
@@ -173,6 +189,7 @@ where
     ) -> anyhow::Result<Self::Task> {
         let UninitializedService {
             use_preconfirmations,
+            heartbeat_retry_delay,
             storage,
             event_fetcher,
             checkpoint_height,
@@ -206,6 +223,7 @@ where
             #[cfg(feature = "blocks-subscription")]
             broadcast_blocks: shared_state.broadcast_blocks,
             heartbeat_liveness,
+            heartbeat_retry_delay,
         };
 
         Ok(task)
@@ -492,6 +510,34 @@ where
 
         Ok(())
     }
+
+    /// Keep the service alive when a heartbeat cannot be processed.
+    ///
+    /// The common cause is lag, not corruption: `sync_up_to` gives up when the
+    /// range it asked for did not reach the final height, which happens
+    /// whenever the node being read from is a block or two behind. Stopping on
+    /// that took the whole indexer down, and with it the checkpoint channel
+    /// every consumer depends on — on 2026-08-19 a one-block shortfall
+    /// (`03b12a75` against a final `03b12a76`) ended the service and left the
+    /// consuming API without a data source.
+    ///
+    /// So keep trying until it works. The condition clears by itself once the
+    /// node catches up, and a stream that has genuinely died is already
+    /// replaced by the liveness arm.
+    ///
+    /// Retries are paced by block arrival, since the loop goes back to awaiting
+    /// the next heartbeat; `heartbeat_retry_delay` adds a floor on top of that
+    /// so a fast-arriving backlog cannot hammer a failure. `ErrorContinue`
+    /// reports each attempt rather than swallowing it, so a failure that never
+    /// clears stays visible.
+    async fn retry_after_heartbeat_failure(
+        &self,
+        err: anyhow::Error,
+    ) -> fuel_core_services::TaskNextAction {
+        tracing::warn!("Failed to handle heartbeat, retrying: {err:?}");
+        tokio::time::sleep(self.heartbeat_retry_delay).await;
+        fuel_core_services::TaskNextAction::ErrorContinue(err)
+    }
 }
 
 impl<S, F> RunnableTask for Task<S, F>
@@ -570,11 +616,13 @@ where
                     Some(block) => {
                         tokio::select! {
                             result = self.handle_heartbeat(block, true) => {
-                                if let Err(err) = result {
-                                    tracing::error!("Failed to handle heartbeat: {err:?}");
-                                    fuel_core_services::TaskNextAction::Stop
-                                } else {
-                                    fuel_core_services::TaskNextAction::Continue
+                                match result {
+                                    Ok(()) => {
+                                        fuel_core_services::TaskNextAction::Continue
+                                    }
+                                    Err(err) => {
+                                        self.retry_after_heartbeat_failure(err).await
+                                    }
                                 }
                             }
 
@@ -895,6 +943,7 @@ pub fn new_service<S, F>(
     use_preconfirmations: bool,
     storage: S,
     fetcher: F,
+    heartbeat_retry_delay: Duration,
 ) -> anyhow::Result<ReceiptsManager<S, F>>
 where
     S: super::port::Storage,
@@ -905,6 +954,7 @@ where
         use_preconfirmations,
         storage,
         fetcher,
-    )?;
+    )?
+    .with_heartbeat_retry_delay(heartbeat_retry_delay);
     Ok(ServiceRunner::new(uninit))
 }
