@@ -38,4 +38,8 @@ tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+fuel-storage-utils = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "test-util"] }
 serde_json = "1.0.145"
