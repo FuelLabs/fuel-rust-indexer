@@ -56,6 +56,8 @@ impl fuel_events_manager::port::ReceiptsProcessor for Processor {
 struct Fetch {
     blocks: Arc<Vec<FinalizedBlock>>,
     pulled: Arc<AtomicUsize>,
+    heartbeats: Vec<FinalizedBlock>,
+    subscriptions: Arc<AtomicUsize>,
 }
 
 impl Fetcher for Fetch {
@@ -66,7 +68,8 @@ impl Fetcher for Fetch {
     }
 
     fn finalized_blocks_stream(&self) -> anyhow::Result<BoxStream<FinalizedBlock>> {
-        Ok(futures::stream::iter([self.blocks.last().unwrap().clone()])
+        self.subscriptions.fetch_add(1, Ordering::SeqCst);
+        Ok(futures::stream::iter(self.heartbeats.clone())
             .chain(futures::stream::pending())
             .into_boxed())
     }
@@ -131,17 +134,25 @@ fn pipeline_with_storage(
     receipts: ReceiptStorage,
     events: EventStorage,
 ) -> (Pipeline, Arc<AtomicUsize>) {
-    let pulled = Arc::new(AtomicUsize::new(0));
-    let receipts_manager = fuel_receipts_manager::service::new_service(
-        0.into(),
-        false,
-        receipts,
-        Fetch {
-            blocks: Arc::new(blocks(count)),
-            pulled: pulled.clone(),
-        },
-    )
-    .unwrap();
+    let blocks = Arc::new(blocks(count));
+    let fetch = Fetch {
+        heartbeats: vec![blocks.last().unwrap().clone()],
+        blocks,
+        pulled: Default::default(),
+        subscriptions: Default::default(),
+    };
+    let pulled = fetch.pulled.clone();
+    (pipeline_with_fetch(fetch, receipts, events), pulled)
+}
+
+fn pipeline_with_fetch(
+    fetch: Fetch,
+    receipts: ReceiptStorage,
+    events: EventStorage,
+) -> Pipeline {
+    let receipts_manager =
+        fuel_receipts_manager::service::new_service(0.into(), false, receipts, fetch)
+            .unwrap();
     let events_manager = fuel_events_manager::service::new_service(
         Processor,
         0.into(),
@@ -151,13 +162,10 @@ fn pipeline_with_storage(
         Arc::new(ReceiptsTimestamps::new(receipts_manager.shared.clone())),
     )
     .unwrap();
-    (
-        ServiceRunner::new(Task {
-            receipts_manager,
-            events_manager,
-        }),
-        pulled,
-    )
+    ServiceRunner::new(Task {
+        receipts_manager,
+        events_manager,
+    })
 }
 
 async fn drain(
@@ -637,5 +645,130 @@ async fn slow_book_gates_producers_even_while_registry_keeps_polling() {
         .await
         .unwrap();
     assert_eq!(registry_task.await.unwrap(), book_events);
+    service.stop_and_await().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn resumed_producer_polls_buffered_heartbeat_before_liveness_timeout() {
+    let blocks = Arc::new(blocks(20));
+    let subscriptions = Arc::new(AtomicUsize::new(0));
+    let fetch = Fetch {
+        // Another heartbeat is ready when the first heartbeat's sync finishes.
+        heartbeats: vec![blocks[18].clone(), blocks[19].clone()],
+        blocks,
+        pulled: Default::default(),
+        subscriptions: subscriptions.clone(),
+    };
+    let service =
+        pipeline_with_fetch(fetch, ReceiptStorage::default(), EventStorage::default());
+    let mut fold = service
+        .shared
+        .unstable_events_starting_from_with_backpressure(
+            1.into(),
+            NonZeroUsize::new(2).unwrap(),
+        )
+        .await
+        .unwrap();
+    service.start_and_await().await.unwrap();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(600),
+            service.shared.events().await_height(3.into()),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(subscriptions.load(Ordering::SeqCst), 1);
+
+    tokio::time::timeout(Duration::from_secs(1), drain(&mut fold, 20))
+        .await
+        .unwrap();
+    service
+        .shared
+        .events()
+        .await_height(20.into())
+        .await
+        .unwrap();
+    assert_eq!(
+        subscriptions.load(Ordering::SeqCst),
+        1,
+        "buffered heartbeats must be polled before declaring the source dead"
+    );
+
+    // Once that source really is idle, its existing five-second liveness
+    // timeout must still reconnect; merely removing the timer fails this.
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(6),
+            service.shared.events().await_height(21.into()),
+        )
+        .await
+        .is_err()
+    );
+    assert!(subscriptions.load(Ordering::SeqCst) >= 2);
+    service.stop_and_await().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn replacing_stalled_required_stream_returns_before_handoff_commit() {
+    let (service, _) = pipeline(20);
+    let mut fold = service
+        .shared
+        .unstable_events_starting_from_with_backpressure(
+            1.into(),
+            NonZeroUsize::new(2).unwrap(),
+        )
+        .await
+        .unwrap();
+    service.start_and_await().await.unwrap();
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            service.shared.events().await_height(3.into()),
+        )
+        .await
+        .is_err()
+    );
+
+    // Match registry/book reconnect: construct the replacement with the old
+    // unpolled stream still alive. Block 3 cannot commit until it is dropped.
+    let replacement = tokio::time::timeout(
+        Duration::from_millis(10),
+        service
+            .shared
+            .unstable_events_starting_from_with_backpressure(
+                3.into(),
+                NonZeroUsize::new(2).unwrap(),
+            ),
+    )
+    .await
+    .expect("subscription construction must not await the H+1 commit")
+    .unwrap();
+    // Registration did not disable the old gate. Replacing the stream
+    // (as reconnect does) releases that gate.
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            service.shared.events().await_height(3.into()),
+        )
+        .await
+        .is_err()
+    );
+    drop(std::mem::replace(&mut fold, replacement));
+    let actual = tokio::time::timeout(Duration::from_secs(1), drain(&mut fold, 20))
+        .await
+        .unwrap();
+    service
+        .shared
+        .events()
+        .await_height(20.into())
+        .await
+        .unwrap();
+    let mut replay = service
+        .shared
+        .unstable_events_starting_from(3.into())
+        .await
+        .unwrap();
+    assert_eq!(actual, drain(&mut replay, 20).await);
     service.stop_and_await().await.unwrap();
 }

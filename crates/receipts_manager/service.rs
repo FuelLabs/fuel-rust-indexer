@@ -574,22 +574,9 @@ where
                 }
             }
 
-            _ = self.heartbeat_liveness.tick() => {
-                tracing::error!("Heartbeat liveness timeout reached, \
-                    attempting to reconnect to confirmed events stream.");
-                match self.fetcher.finalized_blocks_stream() {
-                    Ok(stream) => {
-                        self.heartbeat = stream;
-                        self.heartbeat_liveness.reset();
-                        fuel_core_services::TaskNextAction::Continue
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to fetch confirmed events stream: {}", e);
-                        fuel_core_services::TaskNextAction::ErrorContinue(e)
-                    }
-                }
-            }
-
+            // A required consumer can pause publication longer than the
+            // liveness interval. Poll buffered heartbeats before declaring the
+            // source idle; the timeout still reconnects when this is pending.
             hearbeat = self.heartbeat.next() => {
                 self.heartbeat_liveness.reset();
                 match hearbeat {
@@ -619,6 +606,22 @@ where
 
                             _ = watcher.while_started() => fuel_core_services::TaskNextAction::Stop,
                         }
+                    }
+                }
+            }
+
+            _ = self.heartbeat_liveness.tick() => {
+                tracing::error!("Heartbeat liveness timeout reached, \
+                    attempting to reconnect to confirmed events stream.");
+                match self.fetcher.finalized_blocks_stream() {
+                    Ok(stream) => {
+                        self.heartbeat = stream;
+                        self.heartbeat_liveness.reset();
+                        fuel_core_services::TaskNextAction::Continue
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch confirmed events stream: {}", e);
+                        fuel_core_services::TaskNextAction::ErrorContinue(e)
                     }
                 }
             }

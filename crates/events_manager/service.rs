@@ -474,6 +474,9 @@ where
 
     /// Required internal consumer: a full live queue makes this producer wait.
     /// External observers should use `unstable_events_starting_from` instead.
+    /// Construction does not wait for the replay handoff: H+1 is awaited only
+    /// when the returned stream is polled, so a caller can replace/drop its old
+    /// required subscription before waiting for that block to commit.
     pub async fn unstable_events_starting_from_with_backpressure(
         &self,
         start_height: BlockHeight,
