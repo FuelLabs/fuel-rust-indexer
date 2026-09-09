@@ -33,16 +33,20 @@ use fuel_core_types::{
     },
     fuel_types::BlockHeight,
 };
-use fuel_indexer_types::events::{
-    CheckpointEvent,
-    ExecutionStatus,
-    SuccessfulTransactionReceipts,
-    UnstableReceipts,
+use fuel_indexer_types::{
+    backpressure,
+    events::{
+        CheckpointEvent,
+        ExecutionStatus,
+        SuccessfulTransactionReceipts,
+        UnstableReceipts,
+    },
 };
 use fuel_storage_utils::StorageIterator;
 use futures::StreamExt;
 use std::{
     iter,
+    num::NonZeroUsize,
     sync::Arc,
     time::Duration,
 };
@@ -50,7 +54,10 @@ use tokio::sync::{
     broadcast,
     watch,
 };
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::{
+    BroadcastStream,
+    ReceiverStream,
+};
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Clone, Hash)]
 pub struct TransactionEvents<Event> {
@@ -93,6 +100,7 @@ where
     storage: S,
     streams: StreamsSource,
     checkpoint_height: watch::Sender<BlockHeight>,
+    required_publisher: backpressure::Publisher<UnstableEvent<Processor::Event>>,
     shared_state: SharedState<Processor::Event, S>,
 }
 
@@ -121,7 +129,9 @@ where
 
         let (unstable_broadcast, _) = broadcast::channel(100_000);
         let (stable_broadcast, _) = broadcast::channel(100_000);
+        let (required_publisher, required_subscriptions) = backpressure::Publisher::new();
         let shared_state = SharedState {
+            required_subscriptions,
             starting_height,
             storage: storage.clone(),
             unstable_broadcast: Arc::new(unstable_broadcast),
@@ -135,6 +145,7 @@ where
             storage,
             streams,
             checkpoint_height,
+            required_publisher,
             shared_state,
         };
 
@@ -153,6 +164,7 @@ where
     event_source: BoxStream<anyhow::Result<UnstableReceipts>>,
     streams: StreamsSource,
     checkpoint_height: watch::Sender<BlockHeight>,
+    required_publisher: backpressure::Publisher<UnstableEvent<Processor::Event>>,
     unstable_broadcast: Arc<broadcast::Sender<UnstableEvent<Processor::Event>>>,
     stable_broadcast: Arc<broadcast::Sender<TransactionEvents<Processor::Event>>>,
 }
@@ -187,6 +199,7 @@ where
             storage,
             streams,
             checkpoint_height,
+            required_publisher,
             shared_state,
         } = self;
 
@@ -199,11 +212,12 @@ where
             event_source: futures::stream::empty().into_boxed(),
             streams,
             checkpoint_height,
+            required_publisher,
             unstable_broadcast: shared_state.unstable_broadcast,
             stable_broadcast: shared_state.stable_broadcast,
         };
 
-        task.reconnect_service_events_stream()?;
+        task.reconnect_service_events_stream().await?;
 
         Ok(task)
     }
@@ -215,16 +229,16 @@ where
     S: super::port::Storage,
     StreamsSource: super::port::StreamsSource,
 {
-    fn broadcast_unstable_event(&self, event: UnstableEvent<Processor::Event>) {
-        // Broadcast to internal channel
-        let result = self.unstable_broadcast.send(event);
-
-        if let Err(err) = result {
-            tracing::warn!("Failed to broadcast unstable event: {}", err);
-        }
+    async fn broadcast_unstable_event(&self, event: UnstableEvent<Processor::Event>) {
+        // Required folds constrain publication; observers do not.
+        self.required_publisher
+            .send(event.block_height(), &event)
+            .await;
+        // Having no observers is normal when folds use required subscriptions.
+        let _ = self.unstable_broadcast.send(event);
     }
 
-    fn reconnect_service_events_stream(&mut self) -> anyhow::Result<()> {
+    async fn reconnect_service_events_stream(&mut self) -> anyhow::Result<()> {
         tracing::info!("Reconnecting to receipts provider event stream");
 
         let starting_height =
@@ -235,7 +249,8 @@ where
         let event_source = self.streams.events_starting_from(starting_height)?;
 
         self.event_source = event_source;
-        self.broadcast_unstable_event(UnstableEvent::Rollback(starting_height));
+        self.broadcast_unstable_event(UnstableEvent::Rollback(starting_height))
+            .await;
         self.events.clear();
         self.skipped_events = 0;
 
@@ -248,7 +263,7 @@ where
     ) -> anyhow::Result<()> {
         match event {
             None => {
-                self.reconnect_service_events_stream()?;
+                self.reconnect_service_events_stream().await?;
             }
             Some(event) => {
                 let event = event?;
@@ -297,7 +312,8 @@ where
 
                         assert_eq!(next_block_height, receipts.tx_pointer.block_height());
 
-                        self.broadcast_unstable_event(UnstableEvent::Transaction(tx));
+                        self.broadcast_unstable_event(UnstableEvent::Transaction(tx))
+                            .await;
                     }
                     UnstableReceipts::Checkpoint(checkpoint) => {
                         // This may happen when the service was start at the middle of the block
@@ -306,7 +322,7 @@ where
                             != self.events.len().saturating_add(self.skipped_events)
                             || next_block_height != checkpoint.block_height
                         {
-                            return self.reconnect_service_events_stream();
+                            return self.reconnect_service_events_stream().await;
                         }
 
                         let total_events_count =
@@ -318,7 +334,8 @@ where
                                 events_count: total_events_count,
                                 timestamp: checkpoint.timestamp,
                             },
-                        ));
+                        ))
+                        .await;
 
                         let mut tx = self.storage.write_transaction();
 
@@ -356,7 +373,8 @@ where
                         tokio::task::yield_now().await;
                     }
                     UnstableReceipts::Rollback(at) => {
-                        self.broadcast_unstable_event(UnstableEvent::Rollback(at));
+                        self.broadcast_unstable_event(UnstableEvent::Rollback(at))
+                            .await;
                         self.events.clear();
                         self.skipped_events = 0;
                     }
@@ -418,6 +436,7 @@ pub struct SharedState<Event, S> {
     storage: S,
     unstable_broadcast: Arc<broadcast::Sender<UnstableEvent<Event>>>,
     stable_broadcast: Arc<broadcast::Sender<TransactionEvents<Event>>>,
+    required_subscriptions: backpressure::Subscriptions<UnstableEvent<Event>>,
     checkpoint_height: watch::Receiver<BlockHeight>,
     // Stamps checkpoints replayed from storage with their block header's
     // timestamp (see `port::BlockTimestamps`).
@@ -450,6 +469,27 @@ where
         &self,
         start_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
+        self.unstable_events_starting_from_impl(start_height, None)
+    }
+
+    /// Required internal consumer: a full live queue makes this producer wait.
+    /// External observers should use `unstable_events_starting_from` instead.
+    /// Construction does not wait for the replay handoff: H+1 is awaited only
+    /// when the returned stream is polled, so a caller can replace/drop its old
+    /// required subscription before waiting for that block to commit.
+    pub async fn unstable_events_starting_from_with_backpressure(
+        &self,
+        start_height: BlockHeight,
+        capacity: NonZeroUsize,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
+        self.unstable_events_starting_from_impl(start_height, Some(capacity))
+    }
+
+    fn unstable_events_starting_from_impl(
+        &self,
+        start_height: BlockHeight,
+        capacity: Option<NonZeroUsize>,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
         use futures::TryStreamExt;
 
         // The checkpoint sender is dropped when the service shuts down. A stream built
@@ -470,9 +510,27 @@ where
             ));
         }
 
-        let stream_life_events =
-            BroadcastStream::new(self.unstable_broadcast.subscribe());
-        let available_height = *self.checkpoint_height.borrow();
+        let (available_height, stream_life_events): (
+            _,
+            BoxStream<anyhow::Result<UnstableEvent<Event>>>,
+        ) = if let Some(capacity) = capacity {
+            let (height, receiver) = self
+                .required_subscriptions
+                .subscribe(capacity, &self.checkpoint_height)?;
+            (
+                height,
+                ReceiverStream::new(receiver)
+                    .map(|event| Ok((*event).clone()))
+                    .into_boxed(),
+            )
+        } else {
+            let stream = BroadcastStream::new(self.unstable_broadcast.subscribe())
+                .map(|result| {
+                    result.map_err(|e| anyhow::anyhow!("Broadcast stream error: {}", e))
+                })
+                .into_boxed();
+            (*self.checkpoint_height.borrow(), stream)
+        };
         // We want to wait for next available height, because `stream_life_events` could be created
         // at the mid of the block, and it will not contain all events for the `available_height`.
         let next_available_height = available_height.succ().ok_or_else(|| {
@@ -482,11 +540,8 @@ where
             )
         })?;
 
-        let next_next_available_height_life_stream = stream_life_events
-            .map(|result| {
-                result.map_err(|e| anyhow::anyhow!("Broadcast stream error: {}", e))
-            })
-            .skip_while(move |event| {
+        let next_next_available_height_life_stream =
+            stream_life_events.skip_while(move |event| {
                 let skip = match event {
                     Ok(event) => event.block_height() <= next_available_height,
                     Err(_) => {

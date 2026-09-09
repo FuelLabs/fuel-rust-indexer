@@ -35,6 +35,9 @@ use fuel_receipts_manager::{
 use std::num::NonZeroUsize;
 use url::Url;
 
+#[cfg(test)]
+mod backpressure_tests;
+
 pub use fuel_receipts_manager::adapters::graphql_event_adapter::DEFAULT_PULL_BLOCK_INTERVAL;
 /// Re-exported defaults so service consumers can fill config struct
 /// literals without reaching into `fuel_receipts_manager` internals.
@@ -48,6 +51,9 @@ pub use rocksdb::*;
 use fuel_indexer_types::events::BlockEvent;
 
 pub struct Config {
+    /// Opt-in bounded receipts delivery to the events manager. `None` retains
+    /// the observer broadcast behavior. Configure before starting the service.
+    pub required_consumer_capacity: Option<NonZeroUsize>,
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
     /// List of Fuel GraphQL URLs for failover support.
@@ -76,6 +82,7 @@ impl Config {
         urls: Vec<Url>,
     ) -> Self {
         Self {
+            required_consumer_capacity: None,
             starting_block_height,
             use_preconfirmations,
             fuel_graphql_urls: urls,
@@ -224,6 +231,21 @@ where
             .await
     }
 
+    /// Subscribe a required indexing consumer. Its full live queue pauses the
+    /// events producer; external observers must use the ordinary subscription.
+    pub async fn unstable_events_starting_from_with_backpressure(
+        &self,
+        starting_block_height: BlockHeight,
+        capacity: NonZeroUsize,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableEvent<Event>>>> {
+        self.events
+            .unstable_events_starting_from_with_backpressure(
+                starting_block_height,
+                capacity,
+            )
+            .await
+    }
+
     #[cfg(feature = "blocks-subscription")]
     pub async fn blocks_starting_from(
         &self,
@@ -247,6 +269,7 @@ where
     ES: fuel_events_manager::port::Storage,
 {
     let Config {
+        required_consumer_capacity,
         starting_block_height,
         use_preconfirmations,
         fuel_graphql_urls,
@@ -281,7 +304,8 @@ where
         processor,
         starting_block_height,
         events_storage,
-        StreamsAdapter::new(receipts_manager.shared.clone()),
+        StreamsAdapter::new(receipts_manager.shared.clone())
+            .with_backpressure(required_consumer_capacity),
         std::sync::Arc::new(ReceiptsTimestamps::new(receipts_manager.shared.clone())),
     )?;
 
@@ -295,6 +319,8 @@ where
 
 #[cfg(feature = "rpc")]
 pub struct RpcConfig {
+    /// Opt-in bounded receipts delivery to the events manager.
+    pub required_consumer_capacity: Option<NonZeroUsize>,
     pub starting_block_height: BlockHeight,
     pub use_preconfirmations: bool,
     /// GraphQL URLs that back the main client. Preconfirmation
@@ -331,6 +357,7 @@ impl RpcConfig {
         fuel_rpc_url: Url,
     ) -> Self {
         Self {
+            required_consumer_capacity: None,
             starting_block_height,
             use_preconfirmations,
             fuel_graphql_urls,
@@ -365,6 +392,7 @@ where
     ES: fuel_events_manager::port::Storage,
 {
     let RpcConfig {
+        required_consumer_capacity,
         starting_block_height,
         use_preconfirmations,
         fuel_graphql_urls,
@@ -404,7 +432,8 @@ where
         processor,
         starting_block_height,
         events_storage,
-        StreamsAdapter::new(receipts_manager.shared.clone()),
+        StreamsAdapter::new(receipts_manager.shared.clone())
+            .with_backpressure(required_consumer_capacity),
         std::sync::Arc::new(ReceiptsTimestamps::new(receipts_manager.shared.clone())),
     )?;
 

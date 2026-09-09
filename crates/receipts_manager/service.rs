@@ -33,11 +33,14 @@ use fuel_core_types::{
     fuel_types::BlockHeight,
     services::executor::TransactionExecutionResult,
 };
-use fuel_indexer_types::events::{
-    CheckpointEvent,
-    ExecutionStatus,
-    TransactionReceipts,
-    UnstableReceipts,
+use fuel_indexer_types::{
+    backpressure,
+    events::{
+        CheckpointEvent,
+        ExecutionStatus,
+        TransactionReceipts,
+        UnstableReceipts,
+    },
 };
 use fuel_storage_utils::StorageIterator;
 use futures::{
@@ -47,6 +50,7 @@ use futures::{
 use std::{
     collections::BTreeMap,
     iter,
+    num::NonZeroUsize,
     time::Duration,
 };
 use tokio::{
@@ -56,7 +60,10 @@ use tokio::{
     },
     time::Instant,
 };
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::{
+    BroadcastStream,
+    ReceiverStream,
+};
 
 #[cfg(feature = "blocks-subscription")]
 use crate::storage::Blocks;
@@ -84,6 +91,7 @@ pub struct UninitializedService<S, F> {
     storage: S,
     event_fetcher: F,
     checkpoint_height: watch::Sender<BlockHeight>,
+    required_publisher: backpressure::Publisher<UnstableReceipts>,
     shared_state: SharedState<S>,
 }
 
@@ -113,7 +121,9 @@ where
         let (broadcast_receipts, _) = broadcast::channel(100_000);
         #[cfg(feature = "blocks-subscription")]
         let (broadcast_blocks, _) = broadcast::channel(100_000);
+        let (required_publisher, required_subscriptions) = backpressure::Publisher::new();
         let shared_state = SharedState {
+            required_subscriptions,
             starting_height,
             storage: storage.clone(),
             broadcast_receipts,
@@ -127,6 +137,7 @@ where
             storage,
             event_fetcher,
             checkpoint_height,
+            required_publisher,
             shared_state,
         };
 
@@ -143,6 +154,7 @@ pub struct Task<S, F> {
     emitted_events: Vec<TransactionReceipts>,
     pending_events: BTreeMap<BlockHeight, BTreeMap<u16, TransactionReceipts>>,
     checkpoint_height: watch::Sender<BlockHeight>,
+    required_publisher: backpressure::Publisher<UnstableReceipts>,
     broadcast_receipts: broadcast::Sender<UnstableReceipts>,
     #[cfg(feature = "blocks-subscription")]
     broadcast_blocks: broadcast::Sender<BlockEvent>,
@@ -176,6 +188,7 @@ where
             storage,
             event_fetcher,
             checkpoint_height,
+            required_publisher,
             shared_state,
         } = self;
 
@@ -202,6 +215,7 @@ where
             pending_events: Default::default(),
             emitted_events: Default::default(),
             checkpoint_height,
+            required_publisher,
             broadcast_receipts: shared_state.broadcast_receipts,
             #[cfg(feature = "blocks-subscription")]
             broadcast_blocks: shared_state.broadcast_blocks,
@@ -217,11 +231,13 @@ where
     S: super::port::Storage,
     F: super::port::Fetcher,
 {
-    fn broadcast_event(
+    async fn broadcast_event(
         broadcast: &broadcast::Sender<UnstableReceipts>,
+        required: &backpressure::Publisher<UnstableReceipts>,
         event: UnstableReceipts,
     ) -> anyhow::Result<()> {
         // Broadcast to internal channel
+        required.send(event.block_height(), &event).await;
         let _ = broadcast.send(event);
 
         Ok(())
@@ -364,7 +380,12 @@ where
                 && receipts[..emitted_events.len()] == emitted_events[..]
             {
                 for event in receipts.into_iter().skip(emitted_events.len()) {
-                    Self::broadcast_event(&self.broadcast_receipts, event.into())?;
+                    Self::broadcast_event(
+                        &self.broadcast_receipts,
+                        &self.required_publisher,
+                        event.into(),
+                    )
+                    .await?;
                 }
             } else {
                 if !emitted_events.is_empty() {
@@ -379,24 +400,33 @@ where
 
                     Self::broadcast_event(
                         &self.broadcast_receipts,
+                        &self.required_publisher,
                         UnstableReceipts::Rollback(block_height),
-                    )?;
+                    )
+                    .await?;
                 }
 
                 for event in receipts {
-                    Self::broadcast_event(&self.broadcast_receipts, event.into())?;
+                    Self::broadcast_event(
+                        &self.broadcast_receipts,
+                        &self.required_publisher,
+                        event.into(),
+                    )
+                    .await?;
                 }
             }
         }
 
         Self::broadcast_event(
             &self.broadcast_receipts,
+            &self.required_publisher,
             UnstableReceipts::Checkpoint(CheckpointEvent {
                 block_height,
                 events_count,
                 timestamp: block_timestamp,
             }),
-        )?;
+        )
+        .await?;
         #[cfg(feature = "blocks-subscription")]
         let _ = self.broadcast_blocks.send(block_event);
 
@@ -416,7 +446,7 @@ where
                 .unwrap_or_default();
 
             for (_, next_event) in next_pending_events {
-                self.handle_next_event(next_event)?;
+                self.handle_next_event(next_event).await?;
             }
         }
 
@@ -425,7 +455,7 @@ where
         Ok(())
     }
 
-    fn handle_next_event(
+    async fn handle_next_event(
         &mut self,
         next_event: TransactionReceipts,
     ) -> anyhow::Result<()> {
@@ -477,7 +507,12 @@ where
                 if event_entry.get().tx_pointer == next_tx_pointer {
                     let event = event_entry.remove();
                     self.emitted_events.push(event.clone());
-                    Self::broadcast_event(&self.broadcast_receipts, event.into())?;
+                    Self::broadcast_event(
+                        &self.broadcast_receipts,
+                        &self.required_publisher,
+                        event.into(),
+                    )
+                    .await?;
                 } else {
                     break;
                 }
@@ -525,7 +560,11 @@ where
                         }
                     }
                     Some(event) => {
-                        if let Err(err) = self.handle_next_event(event) {
+                        let result = tokio::select! {
+                            _ = watcher.while_started() => return fuel_core_services::TaskNextAction::Stop,
+                            result = self.handle_next_event(event) => result,
+                        };
+                        if let Err(err) = result {
                             tracing::error!("Failed to handle next event: {err:?}");
                             fuel_core_services::TaskNextAction::Stop
                         } else {
@@ -535,22 +574,9 @@ where
                 }
             }
 
-            _ = self.heartbeat_liveness.tick() => {
-                tracing::error!("Heartbeat liveness timeout reached, \
-                    attempting to reconnect to confirmed events stream.");
-                match self.fetcher.finalized_blocks_stream() {
-                    Ok(stream) => {
-                        self.heartbeat = stream;
-                        self.heartbeat_liveness.reset();
-                        fuel_core_services::TaskNextAction::Continue
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to fetch confirmed events stream: {}", e);
-                        fuel_core_services::TaskNextAction::ErrorContinue(e)
-                    }
-                }
-            }
-
+            // A required consumer can pause publication longer than the
+            // liveness interval. Poll buffered heartbeats before declaring the
+            // source idle; the timeout still reconnects when this is pending.
             hearbeat = self.heartbeat.next() => {
                 self.heartbeat_liveness.reset();
                 match hearbeat {
@@ -583,6 +609,22 @@ where
                     }
                 }
             }
+
+            _ = self.heartbeat_liveness.tick() => {
+                tracing::error!("Heartbeat liveness timeout reached, \
+                    attempting to reconnect to confirmed events stream.");
+                match self.fetcher.finalized_blocks_stream() {
+                    Ok(stream) => {
+                        self.heartbeat = stream;
+                        self.heartbeat_liveness.reset();
+                        fuel_core_services::TaskNextAction::Continue
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch confirmed events stream: {}", e);
+                        fuel_core_services::TaskNextAction::ErrorContinue(e)
+                    }
+                }
+            }
         }
     }
 
@@ -599,6 +641,7 @@ pub struct SharedState<S> {
     broadcast_receipts: broadcast::Sender<UnstableReceipts>,
     #[cfg(feature = "blocks-subscription")]
     broadcast_blocks: broadcast::Sender<BlockEvent>,
+    required_subscriptions: backpressure::Subscriptions<UnstableReceipts>,
     checkpoint_height: watch::Receiver<BlockHeight>,
 }
 
@@ -627,6 +670,24 @@ where
         &self,
         start_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
+        self.unstable_receipts_starting_from_impl(start_height, None)
+    }
+
+    /// Required internal consumer: a full live queue makes this producer wait.
+    /// External observers should use `unstable_receipts_starting_from` instead.
+    pub fn unstable_receipts_starting_from_with_backpressure(
+        &self,
+        start_height: BlockHeight,
+        capacity: NonZeroUsize,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
+        self.unstable_receipts_starting_from_impl(start_height, Some(capacity))
+    }
+
+    fn unstable_receipts_starting_from_impl(
+        &self,
+        start_height: BlockHeight,
+        capacity: Option<NonZeroUsize>,
+    ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
         use futures::TryStreamExt;
 
         // The checkpoint sender is dropped when the service shuts down. A stream built
@@ -647,9 +708,27 @@ where
             ));
         }
 
-        let stream_life_events =
-            BroadcastStream::new(self.broadcast_receipts.subscribe());
-        let available_height = *self.checkpoint_height.borrow();
+        let (available_height, stream_life_events): (
+            _,
+            BoxStream<anyhow::Result<UnstableReceipts>>,
+        ) = if let Some(capacity) = capacity {
+            let (height, receiver) = self
+                .required_subscriptions
+                .subscribe(capacity, &self.checkpoint_height)?;
+            (
+                height,
+                ReceiverStream::new(receiver)
+                    .map(|event| Ok((*event).clone()))
+                    .into_boxed(),
+            )
+        } else {
+            let stream = BroadcastStream::new(self.broadcast_receipts.subscribe())
+                .map(|result| {
+                    result.map_err(|e| anyhow::anyhow!("Broadcast stream error: {}", e))
+                })
+                .into_boxed();
+            (*self.checkpoint_height.borrow(), stream)
+        };
         // We want to wait for next available height, because `stream_life_events` could be created
         // at the mid of the block, and it will not contain all events for the `available_height`.
         let next_available_height = available_height.succ().ok_or_else(|| {
@@ -659,11 +738,8 @@ where
             )
         })?;
 
-        let next_next_available_height_life_stream = stream_life_events
-            .map(|result| {
-                result.map_err(|e| anyhow::anyhow!("Broadcast stream error: {}", e))
-            })
-            .skip_while(move |event| {
+        let next_next_available_height_life_stream =
+            stream_life_events.skip_while(move |event| {
                 let skip = match event {
                     Ok(event) => event.block_height() <= next_available_height,
                     Err(_) => {

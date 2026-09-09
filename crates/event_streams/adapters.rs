@@ -8,14 +8,24 @@ use fuel_indexer_types::events::{
     SuccessfulTransactionReceipts,
     UnstableReceipts,
 };
+use std::num::NonZeroUsize;
 
 pub struct StreamsAdapter<S> {
     receipts: fuel_receipts_manager::service::SharedState<S>,
+    required_capacity: Option<NonZeroUsize>,
 }
 
 impl<S> StreamsAdapter<S> {
     pub fn new(receipts: fuel_receipts_manager::service::SharedState<S>) -> Self {
-        Self { receipts }
+        Self {
+            receipts,
+            required_capacity: None,
+        }
+    }
+
+    pub fn with_backpressure(mut self, capacity: Option<NonZeroUsize>) -> Self {
+        self.required_capacity = capacity;
+        self
     }
 }
 
@@ -27,7 +37,12 @@ where
         &mut self,
         start_height: BlockHeight,
     ) -> anyhow::Result<BoxStream<anyhow::Result<UnstableReceipts>>> {
-        self.receipts.unstable_receipts_starting_from(start_height)
+        if let Some(capacity) = self.required_capacity {
+            self.receipts
+                .unstable_receipts_starting_from_with_backpressure(start_height, capacity)
+        } else {
+            self.receipts.unstable_receipts_starting_from(start_height)
+        }
     }
 }
 
